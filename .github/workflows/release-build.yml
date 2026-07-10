@@ -1,0 +1,57 @@
+name: release-build
+
+# Cross-platform release build — the FULL macOS + Windows + Linux matrix.
+#
+# This intentionally does NOT run on routine branch pushes: GitHub bills included Actions minutes with a
+# per-OS multiplier (Linux 1x, Windows 2x, macOS 10x), so a 3-OS matrix on every push drained the free
+# quota. Everyday pushes use ci.yml (Ubuntu-only, 1x). This workflow runs ONLY when:
+#   * you push a version tag        —  git tag vX.Y.Z && git push origin vX.Y.Z   (the release path), or
+#   * you click "Run workflow" in the Actions tab  (workflow_dispatch)            (on-demand cross-platform check).
+#
+# So re-enabling macOS/Windows verification is automatic at release time and one click otherwise — there is
+# no config switch to remember to flip. See the release runbook ("Cross-platform CI").
+#
+# ✅ FIXED 2026-07-10: the Windows leg was failing to COMPILE — `error C2065: 'M_PI' undeclared` in
+# tools_spatial.cpp. MSVC's <cmath> only defines M_PI when _USE_MATH_DEFINES is set before the include;
+# glibc (gnu++17 => _GNU_SOURCE) and Apple libc++ expose it unconditionally, which is why the Ubuntu +
+# macOS legs stayed green. Fix = `if(MSVC) add_compile_definitions(_USE_MATH_DEFINES) endif()` in
+# CMakeLists.txt. The earlier "prime suspect = missing ws2_32 link" was a RED HERRING: httplib.h already
+# auto-links ws2_32 on MSVC via `#pragma comment(lib, "ws2_32.lib")` (guarded by _MSC_VER) — an explicit
+# WIN32-guarded ws2_32 link was still added, but only as non-MSVC (MinGW/clang) hardening, not the fix.
+# The Windows/Linux artifacts must NOT be published in the ReaPack index until each has load-verified
+# inside a real REAPER on that OS (deferred "Windows/Linux load-verify").
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release -R unit --output-on-failure
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reaper_mcp-${{ matrix.os }}
+          path: |
+            build/**/reaper_mcp.dll
+            build/**/reaper_mcp.dylib
+            build/**/reaper_mcp.so
+          if-no-files-found: ignore

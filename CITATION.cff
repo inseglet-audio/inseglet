@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use Inseglet in your work, please cite it as below."
+title: "Inseglet"
+version: "1.5.0"
+abstract: >-
+  A native REAPER extension exposing a Model Context Protocol (MCP) interface, with
+  immersive/spatial audio and native ITU-R BS.2076 ADM (Dolby Atmos) authoring as its
+  primary differentiators.
+type: software
+authors:
+  - given-names: James
+    family-names: Livingston
+    alias: jlivingston-Cipher
+repository-code: "https://github.com/inseglet-audio/inseglet"
+url: "https://github.com/inseglet-audio/inseglet"
+license: MIT
+keywords:
+  - REAPER
+  - Model Context Protocol
+  - MCP
+  - spatial audio
+  - immersive audio
+  - ambisonics
+  - Dolby Atmos
+  - ADM
+  - BS.2076

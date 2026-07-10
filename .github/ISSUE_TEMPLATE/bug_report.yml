@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a defect in Inseglet
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please include enough detail to reproduce the issue.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The MCP tool call(s) or actions that trigger it. Include arguments where relevant.
+      placeholder: |
+        1. Call `spatial.export_adm` with ...
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: reaper-version
+    attributes:
+      label: REAPER version
+      placeholder: "e.g. 7.24"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: input
+    id: mcp-client
+    attributes:
+      label: MCP client
+      placeholder: "e.g. Claude Desktop, custom client"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Console output / logs
+      description: Relevant lines from the REAPER console. Redact any bearer token.
+      render: shell

@@ -1,0 +1,33 @@
+name: Feature request
+description: Suggest a new tool, verb, or capability
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The workflow or gap you're hitting. What are you trying to do?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed tool / behavior
+      description: The MCP tool or verb you'd like, its inputs/outputs, and how it should behave.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing tools, external workarounds, or other designs you weighed.
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Area
+      options:
+        - label: Core / editing
+        - label: Spatial / ambisonics
+        - label: Immersive metering / DSP
+        - label: ADM / Atmos deliverables
+        - label: Build / packaging

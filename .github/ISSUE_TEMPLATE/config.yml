@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas
+    url: https://github.com/inseglet-audio/inseglet/discussions
+    about: For usage questions, design ideas, and open-ended discussion, please use Discussions.
+  - name: Security report
+    url: https://github.com/inseglet-audio/inseglet/blob/main/SECURITY.md
+    about: Please report security issues privately per SECURITY.md — do not open a public issue.

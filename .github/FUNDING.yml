@@ -1,0 +1,7 @@
+# Enables the "Sponsor" button on the repo. The github: entry requires you to have
+# enrolled in GitHub Sponsors (https://github.com/sponsors) — until then it is harmless
+# but the button won't appear. Add other platforms (open_collective, ko_fi, custom URL) as desired.
+github: [jlivingston-Cipher]
+# open_collective: # your-collective
+# ko_fi: # your-handle
+# custom: # ["https://inseglet.dev/sponsor"]

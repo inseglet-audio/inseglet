@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ReaPack index for reaper_mcp — the canonical copy of the PUBLIC distribution index.
+
+  Served to ReaPack clients from the inseglet-audio/inseglet repo, which doubles as the
+  distribution home:
+    https://github.com/inseglet-audio/inseglet/raw/main/packaging/reapack/index.xml
+  The public repo hosts each compiled binary as a GitHub Release asset, which is what every
+  <source> URL below points at.
+
+  Per release (see the release runbook): prepend a new <version> block, set its release-asset
+  URL + time, and keep the version string in sync with the git tag, CMakeLists project(VERSION),
+  src/mcp_server.cpp kServerVersion, and the src/reaper_mcp.cpp discovery.
+
+  v1 is macOS-only. Uncomment the [windows]/[linux] <source> lines only AFTER the extension is
+  load-verified in a real REAPER on that OS.
+-->
+<index version="1" name="reaper_mcp">
+  <category name="Extensions">
+    <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.5.0" author="James Livingston" time="2026-07-11T00:00:00Z">
+        <changelog><![CDATA[First public macOS release.
+In-process MCP server (Streamable HTTP + SSE, JSON-RPC 2.0, MCP 2025-06-18); loopback-only
+transport with a bearer token; every mutation single-undo.
+186 tools / 3 resources / 3 prompts, with immersive/spatial audio as the differentiator:
+channel beds (5.1–22.2), ambisonic encode/decode + order/format conversion (ACN/SN3D),
+surround panners, binaural monitoring + live head-tracking; native ADM BWF and Dolby Atmos
+Master File (.atmos triad) authoring + inspection; bed/object send-layout orchestration for
+an external renderer; immersive metering (ITU-R BS.1770 loudness, DirAC/Gerzon spatial field,
+per-object loudness, decode-coverage + per-object decode-coverage timelines); deliverable-spec
+conformance; immersive style chains with a multichannel true-peak limiter; a composite macro
+DSL; and async MCP elicitation for destructive confirmation.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.5.0/reaper_mcp.dylib</source>
+        <!-- Windows/Linux: publish only after load-verification on that OS.
+        <source platform="windows" type="extension" file="reaper_mcp.dll">https://github.com/inseglet-audio/inseglet/releases/download/v1.5.0/reaper_mcp.dll</source>
+        <source platform="linux" type="extension" file="reaper_mcp.so">https://github.com/inseglet-audio/inseglet/releases/download/v1.5.0/reaper_mcp.so</source>
+        -->
+      </version>
+      <metadata>
+        <description><![CDATA[A native REAPER extension exposing a first-class Model Context Protocol (MCP) interface, with immersive / spatial audio as the primary differentiator. Loopback-only transport with a bearer token; every mutation is single-undo. macOS-first; Windows/Linux to follow once load-verified.]]></description>
+        <link rel="website">https://github.com/inseglet-audio/inseglet</link>
+      </metadata>
+    </reapack>
+  </category>
+</index>

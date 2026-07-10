@@ -1,0 +1,188 @@
+desc:MCP Multichannel True-Peak Limiter
+//
+// Bundled with the ReaperMCP extension (Phase 6 item c). A LINKED-gain-reduction, look-ahead,
+// inter-sample (true-peak) brickwall limiter for wide immersive beds. It derives ONE gain-reduction
+// value from the maximum true-peak across all MAIN channels (the LFE is EXCLUDED) and applies that SAME
+// gain to every main channel, so the spatial image is preserved — independent per-channel limiting
+// shifts the phantom image on transients. The LFE channel is passed through, time-aligned but NEVER
+// limited (its level is intentionally hot and must not pull the mains down).
+//
+// Why this exists: REAPER's stock 2-channel limiters (ReaLimit / ReaComp) only reach ch 1-2 of a wide
+// bed, leaving the surround/height mains beyond ch 2 unlimited — a real conformance hole for a
+// wide-bed master. This JSFX ships with the extension (JSFX is part of REAPER => zero third-party
+// dependency) and covers all mains with a single linked GR.
+//
+// True-peak detection: a 4x inter-sample-peak estimate via cubic (Catmull-Rom) interpolation over a
+// short per-channel history. A full polyphase oversampler is heavier and unnecessary for a safety
+// limiter sitting on an already-headroomed master; the cubic ISP estimate plus a conservative ceiling
+// contains inter-sample overshoot that plain sample-peak limiting would miss. Look-ahead + instant
+// attack (min-hold) + slow release keeps the DELAYED output at or under the ceiling, and a short gain
+// smoothing (shorter than the look-ahead) removes zipper noise without reintroducing overshoot.
+//
+// The controlling extension (mix.apply_style) discovers the sliders by name and sets:
+//   * "Ceiling"     -> the target deliverable's true-peak (dBTP), e.g. atmos-music = -1 dBTP
+//   * "LFE channel" -> the bed's 1-based LFE channel (4 for 5.1/7.1/7.1.4/9.1.6/22.2), or 0 = none
+// Release / Look-ahead keep sensible mastering defaults.
+
+slider1:ceiling_db=-1<-9,0,0.1>Ceiling (dBTP)
+slider2:release_ms=100<1,1000,1>Release (ms)
+slider3:lookahead_ms=1.5<0.5,10,0.1>Look-ahead (ms)
+slider4:lfe_ch=4<0,64,1>LFE channel (1-based, 0=none)
+slider5:link=1<0,1,1{Independent,Linked}>Gain reduction
+
+// Declare 32 I/O pins so REAPER routes a wide bed (5.1 .. 22.2 = 6 .. 24 ch) with identity pinning by
+// default; pins beyond the track's channel count stay silent/unused.
+in_pin:In 1
+in_pin:In 2
+in_pin:In 3
+in_pin:In 4
+in_pin:In 5
+in_pin:In 6
+in_pin:In 7
+in_pin:In 8
+in_pin:In 9
+in_pin:In 10
+in_pin:In 11
+in_pin:In 12
+in_pin:In 13
+in_pin:In 14
+in_pin:In 15
+in_pin:In 16
+in_pin:In 17
+in_pin:In 18
+in_pin:In 19
+in_pin:In 20
+in_pin:In 21
+in_pin:In 22
+in_pin:In 23
+in_pin:In 24
+in_pin:In 25
+in_pin:In 26
+in_pin:In 27
+in_pin:In 28
+in_pin:In 29
+in_pin:In 30
+in_pin:In 31
+in_pin:In 32
+out_pin:Out 1
+out_pin:Out 2
+out_pin:Out 3
+out_pin:Out 4
+out_pin:Out 5
+out_pin:Out 6
+out_pin:Out 7
+out_pin:Out 8
+out_pin:Out 9
+out_pin:Out 10
+out_pin:Out 11
+out_pin:Out 12
+out_pin:Out 13
+out_pin:Out 14
+out_pin:Out 15
+out_pin:Out 16
+out_pin:Out 17
+out_pin:Out 18
+out_pin:Out 19
+out_pin:Out 20
+out_pin:Out 21
+out_pin:Out 22
+out_pin:Out 23
+out_pin:Out 24
+out_pin:Out 25
+out_pin:Out 26
+out_pin:Out 27
+out_pin:Out 28
+out_pin:Out 29
+out_pin:Out 30
+out_pin:Out 31
+out_pin:Out 32
+
+@init
+MAXCH  = 32;
+MAXDLY = 8192;                 // >= 10 ms of look-ahead at up to ~768 kHz
+dbuf = 0;                      // per-channel delay lines: MAXCH * MAXDLY
+h1   = dbuf + MAXCH * MAXDLY;  // input x[n-1] per channel
+h2   = h1 + MAXCH;             // input x[n-2] per channel
+h3   = h2 + MAXCH;             // input x[n-3] per channel
+ispv = h3 + MAXCH;            // per-channel inter-sample peak this sample
+genv = ispv + MAXCH;         // per-channel gain envelope (min-hold + release)
+grc  = genv + MAXCH;         // per-channel smoothed output gain
+memtop = grc + MAXCH;
+memset(0, 0, memtop);
+i = 0;
+loop(MAXCH, genv[i] = 1.0; grc[i] = 1.0; i += 1;);
+wpos = 0;
+
+@slider
+ceil_lin = 2 ^ (ceiling_db / 6.020599913);    // 10^(dB/20), via 2^(dB/6.0206)
+// Internal true-peak safety pad (-0.2 dB): the cubic ISP estimate is close but not the exact bandlimited
+// reconstruction, so aim a hair under the set ceiling to keep the real inter-sample peak <= ceiling.
+ceil_eff = ceil_lin * (2 ^ (-0.2 / 6.020599913));
+dly = floor(lookahead_ms * 0.001 * srate + 0.5);
+dly < 1 ? dly = 1;
+dly > MAXDLY - 1 ? dly = MAXDLY - 1;
+rel_coef = exp(-1.0 / (max(release_ms, 1.0) * 0.001 * srate));
+// output smoothing time: shorter than the look-ahead so the smoothed gain still settles before the
+// peak reaches the (delayed) output — no overshoot from the smoothing.
+sm_t = min(0.0002, lookahead_ms * 0.001 * 0.3);
+sm_t < 0.00002 ? sm_t = 0.00002;
+smooth_coef = exp(-1.0 / (sm_t * srate));
+
+@sample
+nn = min(num_ch, MAXCH);
+peak = 0.0;
+
+// --- pass 1: capture inputs, update history, compute the linked inter-sample peak of the MAINS ---
+c = 0;
+loop(nn,
+  x = spl(c);
+  islfe = (lfe_ch > 0) && (c == lfe_ch - 1);
+  m = 0.0;
+  islfe ? (
+    m = 0.0;                                  // LFE never contributes to the mains' GR
+  ) : (
+    // Catmull-Rom over the interval [x[n-2], x[n-1]] (1-sample detection latency; << look-ahead):
+    //   p0 = x[n-3], p1 = x[n-2], p2 = x[n-1], p3 = x[n]
+    p0 = h3[c]; p1 = h2[c]; p2 = h1[c]; p3 = x;
+    a = -0.5*p0 + 1.5*p1 - 1.5*p2 + 0.5*p3;
+    b =  p0 - 2.5*p1 + 2.0*p2 - 0.5*p3;
+    d0 = -0.5*p0 + 0.5*p2;
+    e0 = p1;
+    m = max(abs(p1), abs(p2));
+    // 8x inter-sample scan of [p1,p2] (t = 1/8 .. 7/8) — denser than 4x so the estimate hugs the true peak.
+    t = 0.125; v = ((a*t + b)*t + d0)*t + e0; av = abs(v); av > m ? m = av;
+    t = 0.250; v = ((a*t + b)*t + d0)*t + e0; av = abs(v); av > m ? m = av;
+    t = 0.375; v = ((a*t + b)*t + d0)*t + e0; av = abs(v); av > m ? m = av;
+    t = 0.500; v = ((a*t + b)*t + d0)*t + e0; av = abs(v); av > m ? m = av;
+    t = 0.625; v = ((a*t + b)*t + d0)*t + e0; av = abs(v); av > m ? m = av;
+    t = 0.750; v = ((a*t + b)*t + d0)*t + e0; av = abs(v); av > m ? m = av;
+    t = 0.875; v = ((a*t + b)*t + d0)*t + e0; av = abs(v); av > m ? m = av;
+    m > peak ? peak = m;
+  );
+  ispv[c] = m;
+  h3[c] = h2[c]; h2[c] = h1[c]; h1[c] = x;
+  dbuf[c * MAXDLY + wpos] = x;
+  c += 1;
+);
+
+// --- pass 2: per-channel gain (linked => all mains see the same peak) and delayed output ---
+rpos = wpos - dly;
+rpos < 0 ? rpos += MAXDLY;
+c = 0;
+loop(nn,
+  islfe = (lfe_ch > 0) && (c == lfe_ch - 1);
+  pk = link ? peak : ispv[c];
+  des = 1.0;
+  pk > ceil_eff ? des = ceil_eff / pk;
+  // release the envelope toward unity, then instant-attack (min-hold) down to the required gain.
+  genv[c] = 1.0 - (1.0 - genv[c]) * rel_coef;
+  genv[c] > des ? genv[c] = des;
+  // short smoothing (< look-ahead) to avoid zipper noise on the applied gain.
+  grc[c] = genv[c] + (grc[c] - genv[c]) * smooth_coef;
+  y = dbuf[c * MAXDLY + rpos];
+  islfe ? spl(c) = y : spl(c) = y * grc[c];
+  c += 1;
+);
+
+wpos += 1;
+wpos >= MAXDLY ? wpos = 0;

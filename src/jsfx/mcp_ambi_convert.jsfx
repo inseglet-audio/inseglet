@@ -1,0 +1,196 @@
+desc:MCP Ambisonic Format Converter
+//
+// Bundled with the ReaperMCP extension (Batch S1). A zero-dependency ambisonic normalization /
+// format converter for an ACN-ordered HOA bus. JSFX ships with REAPER, so this needs no third-party
+// plug-in (unlike the IEM/SPARTA/ambiX suites the spatial orchestration tools drive).
+//
+// Driven by spatial.convert_format, which discovers the "Conversion" slider by name and sets its mode:
+//   0  SN3D -> N3D     per-ACN gain  g(l) = sqrt(2l+1)              (ANY order)
+//   1  N3D  -> SN3D    per-ACN gain  g(l) = 1/sqrt(2l+1)           (ANY order)
+//   2  ambiX (ACN/SN3D) -> FuMa      first-order / B-format ONLY   (reorder + W*1/sqrt2)
+//   3  FuMa -> ambiX (ACN/SN3D)      first-order / B-format ONLY   (reorder + W*sqrt2)
+//
+// Why FOA-only for FuMa: FuMa (Furse-Malham max-N) is a legacy convention with a single universally
+// agreed table only at first order (classic B-format: W X Y Z, W scaled by 1/sqrt2). Above first order
+// there is no single agreed FuMa max-N set, so the tool refuses HOA FuMa rather than ship a subtly
+// wrong matrix — HOA interchange should use SN3D/N3D. Modes 0/1 are exact for any order.
+//
+// Channel model: ACN index k has degree l = floor(sqrt(k)) and order m = k - l*l - l (m in [-l, +l]).
+// ACN first-order layout is W(0) Y(1) Z(2) X(3); FuMa first-order layout is W X Y Z.
+
+slider1:mode=0<0,3,1{SN3D to N3D,N3D to SN3D,ambiX to FuMa (FOA),FuMa to ambiX (FOA)}>Conversion
+
+in_pin:In 1
+in_pin:In 2
+in_pin:In 3
+in_pin:In 4
+in_pin:In 5
+in_pin:In 6
+in_pin:In 7
+in_pin:In 8
+in_pin:In 9
+in_pin:In 10
+in_pin:In 11
+in_pin:In 12
+in_pin:In 13
+in_pin:In 14
+in_pin:In 15
+in_pin:In 16
+in_pin:In 17
+in_pin:In 18
+in_pin:In 19
+in_pin:In 20
+in_pin:In 21
+in_pin:In 22
+in_pin:In 23
+in_pin:In 24
+in_pin:In 25
+in_pin:In 26
+in_pin:In 27
+in_pin:In 28
+in_pin:In 29
+in_pin:In 30
+in_pin:In 31
+in_pin:In 32
+in_pin:In 33
+in_pin:In 34
+in_pin:In 35
+in_pin:In 36
+in_pin:In 37
+in_pin:In 38
+in_pin:In 39
+in_pin:In 40
+in_pin:In 41
+in_pin:In 42
+in_pin:In 43
+in_pin:In 44
+in_pin:In 45
+in_pin:In 46
+in_pin:In 47
+in_pin:In 48
+in_pin:In 49
+in_pin:In 50
+in_pin:In 51
+in_pin:In 52
+in_pin:In 53
+in_pin:In 54
+in_pin:In 55
+in_pin:In 56
+in_pin:In 57
+in_pin:In 58
+in_pin:In 59
+in_pin:In 60
+in_pin:In 61
+in_pin:In 62
+in_pin:In 63
+in_pin:In 64
+out_pin:Out 1
+out_pin:Out 2
+out_pin:Out 3
+out_pin:Out 4
+out_pin:Out 5
+out_pin:Out 6
+out_pin:Out 7
+out_pin:Out 8
+out_pin:Out 9
+out_pin:Out 10
+out_pin:Out 11
+out_pin:Out 12
+out_pin:Out 13
+out_pin:Out 14
+out_pin:Out 15
+out_pin:Out 16
+out_pin:Out 17
+out_pin:Out 18
+out_pin:Out 19
+out_pin:Out 20
+out_pin:Out 21
+out_pin:Out 22
+out_pin:Out 23
+out_pin:Out 24
+out_pin:Out 25
+out_pin:Out 26
+out_pin:Out 27
+out_pin:Out 28
+out_pin:Out 29
+out_pin:Out 30
+out_pin:Out 31
+out_pin:Out 32
+out_pin:Out 33
+out_pin:Out 34
+out_pin:Out 35
+out_pin:Out 36
+out_pin:Out 37
+out_pin:Out 38
+out_pin:Out 39
+out_pin:Out 40
+out_pin:Out 41
+out_pin:Out 42
+out_pin:Out 43
+out_pin:Out 44
+out_pin:Out 45
+out_pin:Out 46
+out_pin:Out 47
+out_pin:Out 48
+out_pin:Out 49
+out_pin:Out 50
+out_pin:Out 51
+out_pin:Out 52
+out_pin:Out 53
+out_pin:Out 54
+out_pin:Out 55
+out_pin:Out 56
+out_pin:Out 57
+out_pin:Out 58
+out_pin:Out 59
+out_pin:Out 60
+out_pin:Out 61
+out_pin:Out 62
+out_pin:Out 63
+out_pin:Out 64
+
+@init
+deg = 0;            // 64 slots [0..63]: ACN degree l per channel index
+gval = 64;          // 64 slots [64..127]: per-channel gain for the active mode
+i = 0;
+loop(64,
+  deg[i] = floor(sqrt(i) + 0.0001);   // epsilon guards the perfect-square floor
+  i += 1;
+);
+
+@slider
+mm = mode | 0;
+i = 0;
+loop(64,
+  l = deg[i];
+  b = sqrt(2*l + 1);
+  gval[i] = mm == 0 ? b : (mm == 1 ? 1.0/b : 1.0);
+  i += 1;
+);
+
+@sample
+mm = mode | 0;
+n = min(num_ch, 64);
+mm < 2 ? (
+  // Normalization change: identity channel map, per-degree scalar gain (any order).
+  c = 0;
+  loop(n, spl(c) = spl(c) * gval[c]; c += 1;);
+) : mm == 2 ? (
+  // ambiX (ACN/SN3D) -> FuMa, first order only: reorder W Y Z X -> W X Y Z, W *= 1/sqrt2.
+  num_ch >= 4 ? (
+    w = spl(0); yy = spl(1); zz = spl(2); xx = spl(3);
+    spl(0) = w * 0.70710678118654752;
+    spl(1) = xx;
+    spl(2) = yy;
+    spl(3) = zz;
+  );
+) : (
+  // FuMa -> ambiX (ACN/SN3D), first order only: reorder W X Y Z -> W Y Z X, W *= sqrt2.
+  num_ch >= 4 ? (
+    w = spl(0); xx = spl(1); yy = spl(2); zz = spl(3);
+    spl(0) = w * 1.41421356237309505;
+    spl(1) = yy;
+    spl(2) = zz;
+    spl(3) = xx;
+  );
+);

@@ -1,0 +1,11 @@
+@description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
+@version 1.5.0
+@author James Livingston
+@provides
+  [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
+@changelog
+  First public macOS release. In-process MCP server (Streamable HTTP + SSE, MCP 2025-06-18);
+  186 tools / 3 resources / 3 prompts; immersive/spatial audio differentiator (ADM BWF +
+  Dolby Atmos Master File authoring, bed/object send-layout orchestration, decode-coverage
+  timelines, immersive metering, binaural + live head-tracking).
+@link https://github.com/inseglet-audio/inseglet

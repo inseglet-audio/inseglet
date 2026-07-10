@@ -1,0 +1,182 @@
+desc:MCP Ambisonic Scene Mirror
+//
+// Bundled with the ReaperMCP extension (Batch S1). Reflects an ACN-ordered HOA soundfield across one
+// of the three principal planes by applying the exact per-ACN-channel sign pattern of that reflection.
+// A reflection of the sound scene is a pure per-channel polarity flip on the real spherical harmonics,
+// so this is exact and order-independent (any order, up to 64 channels). Zero third-party dependency
+// (JSFX ships with REAPER); complements the plug-in-driven spatial.rotate_scene.
+//
+// Driven by spatial.mirror_scene, which discovers the "Reflection plane" slider by name and sets it:
+//   0  Left-Right   swap L <-> R  (reflect across the front/back vertical plane)  -> flip m < 0
+//   1  Front-Back   swap front <-> back                                           -> flip per (-1)^..
+//   2  Up-Down      swap up <-> down (reflect across the horizontal plane)        -> flip per (-1)^(l+|m|)
+//
+// Real SH (ACN/SN3D) parity, channel k with degree l=floor(sqrt(k)), order m=k-l*l-l, am=|m|:
+//   Left-Right (azimuth phi -> -phi): sin(m phi) channels (m<0) flip; cos channels unchanged.
+//   Front-Back (phi -> pi-phi):       cos channels *= (-1)^m; sin channels *= (-1)^(am+1).
+//   Up-Down   (theta -> pi-theta):    all channels *= (-1)^(l+am)  (elevation parity, azimuth-agnostic).
+// Normalization (SN3D vs N3D) is irrelevant to a sign flip, so this is correct for either.
+
+slider1:plane=0<0,2,1{Left-Right,Front-Back,Up-Down}>Reflection plane
+
+in_pin:In 1
+in_pin:In 2
+in_pin:In 3
+in_pin:In 4
+in_pin:In 5
+in_pin:In 6
+in_pin:In 7
+in_pin:In 8
+in_pin:In 9
+in_pin:In 10
+in_pin:In 11
+in_pin:In 12
+in_pin:In 13
+in_pin:In 14
+in_pin:In 15
+in_pin:In 16
+in_pin:In 17
+in_pin:In 18
+in_pin:In 19
+in_pin:In 20
+in_pin:In 21
+in_pin:In 22
+in_pin:In 23
+in_pin:In 24
+in_pin:In 25
+in_pin:In 26
+in_pin:In 27
+in_pin:In 28
+in_pin:In 29
+in_pin:In 30
+in_pin:In 31
+in_pin:In 32
+in_pin:In 33
+in_pin:In 34
+in_pin:In 35
+in_pin:In 36
+in_pin:In 37
+in_pin:In 38
+in_pin:In 39
+in_pin:In 40
+in_pin:In 41
+in_pin:In 42
+in_pin:In 43
+in_pin:In 44
+in_pin:In 45
+in_pin:In 46
+in_pin:In 47
+in_pin:In 48
+in_pin:In 49
+in_pin:In 50
+in_pin:In 51
+in_pin:In 52
+in_pin:In 53
+in_pin:In 54
+in_pin:In 55
+in_pin:In 56
+in_pin:In 57
+in_pin:In 58
+in_pin:In 59
+in_pin:In 60
+in_pin:In 61
+in_pin:In 62
+in_pin:In 63
+in_pin:In 64
+out_pin:Out 1
+out_pin:Out 2
+out_pin:Out 3
+out_pin:Out 4
+out_pin:Out 5
+out_pin:Out 6
+out_pin:Out 7
+out_pin:Out 8
+out_pin:Out 9
+out_pin:Out 10
+out_pin:Out 11
+out_pin:Out 12
+out_pin:Out 13
+out_pin:Out 14
+out_pin:Out 15
+out_pin:Out 16
+out_pin:Out 17
+out_pin:Out 18
+out_pin:Out 19
+out_pin:Out 20
+out_pin:Out 21
+out_pin:Out 22
+out_pin:Out 23
+out_pin:Out 24
+out_pin:Out 25
+out_pin:Out 26
+out_pin:Out 27
+out_pin:Out 28
+out_pin:Out 29
+out_pin:Out 30
+out_pin:Out 31
+out_pin:Out 32
+out_pin:Out 33
+out_pin:Out 34
+out_pin:Out 35
+out_pin:Out 36
+out_pin:Out 37
+out_pin:Out 38
+out_pin:Out 39
+out_pin:Out 40
+out_pin:Out 41
+out_pin:Out 42
+out_pin:Out 43
+out_pin:Out 44
+out_pin:Out 45
+out_pin:Out 46
+out_pin:Out 47
+out_pin:Out 48
+out_pin:Out 49
+out_pin:Out 50
+out_pin:Out 51
+out_pin:Out 52
+out_pin:Out 53
+out_pin:Out 54
+out_pin:Out 55
+out_pin:Out 56
+out_pin:Out 57
+out_pin:Out 58
+out_pin:Out 59
+out_pin:Out 60
+out_pin:Out 61
+out_pin:Out 62
+out_pin:Out 63
+out_pin:Out 64
+
+@init
+deg = 0;             // 64 slots [0..63]: ACN degree l per channel index
+sgn = 64;            // 64 slots [64..127]: per-channel sign for the active plane
+i = 0;
+loop(64,
+  deg[i] = floor(sqrt(i) + 0.0001);
+  i += 1;
+);
+
+@slider
+pl = plane | 0;
+i = 0;
+loop(64,
+  l = deg[i];
+  m = i - l*l - l;
+  am = abs(m);
+  pl == 0 ? (
+    sgn[i] = m < 0 ? -1 : 1;
+  ) : pl == 1 ? (
+    e = m >= 0 ? am : am + 1;
+    sgn[i] = 1 - 2*(e - 2*floor(e/2));
+  ) : (
+    e = l + am;
+    sgn[i] = 1 - 2*(e - 2*floor(e/2));
+  );
+  i += 1;
+);
+
+@sample
+n = min(num_ch, 64);
+c = 0;
+loop(n, spl(c) = spl(c) * sgn[c]; c += 1;);

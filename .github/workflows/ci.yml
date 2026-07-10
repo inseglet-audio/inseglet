@@ -1,0 +1,58 @@
+name: ci
+
+# Routine CI — Ubuntu-only compile + unit-test smoke test on every push to main / PR.
+#
+# The FULL cross-platform build (macOS + Windows + Linux) lives in release-build.yml and runs ONLY on a
+# version tag (v*) or a manual dispatch — see the release runbook ("Cross-platform CI"). Rationale: GitHub
+# bills included Actions minutes with a per-OS multiplier (Linux 1x, Windows 2x, macOS 10x), so a 3-OS
+# matrix on every push drained the free quota. Ubuntu here is 1x — the cheap "did I break compilation /
+# unit tests?" net. macOS is verified locally on the dev Mac; Windows/Linux load-verify is deferred.
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+      - 'LICENSE'
+
+# A newer push to the same ref cancels the in-progress run — don't pay for superseded builds.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Unit tests
+        run: ctest --test-dir build -C Release -R unit --output-on-failure
+
+      # Integration tests require a REAPER install + REAPER_BIN; wired up in Phase 1.
+      # - name: Integration tests
+      #   env:
+      #     REAPER_BIN: ${{ steps.reaper.outputs.bin }}
+      #   run: ctest --test-dir build -C Release -R integration --output-on-failure
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reaper_mcp-ubuntu-latest
+          path: build/**/reaper_mcp.so
+          if-no-files-found: ignore

@@ -142,7 +142,7 @@ void writeDiscovery() {
                  {"authHeader", "Authorization: Bearer " + g_server->token()},
                  {"protocol", "2025-06-18"},
                  {"server", "reaper_mcp"},
-                 {"version", "1.5.0"},
+                 {"version", "1.5.1"},
                  {"pid", currentPid()}};
     writeDiscoveryFile(g_discoveryPath, info);
 }

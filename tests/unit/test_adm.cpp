@@ -255,6 +255,77 @@ int main() {
         check(!pr2.summary["adm"]["hasExtent"].get<bool>(), "parser: hasExtent false (plain)");
     }
 
+    // ---- (10) W-1: spherical position domain normalization at serialization ----
+    {
+        check(near(wrapAzDeg(270.0), -90.0, 1e-9), "wrapAzDeg(270) = -90");
+        check(near(wrapAzDeg(-270.0), 90.0, 1e-9), "wrapAzDeg(-270) = +90");
+        check(near(wrapAzDeg(180.0), 180.0, 1e-9), "wrapAzDeg(180) stays +180 (canonical rear)");
+        check(near(wrapAzDeg(-180.0), 180.0, 1e-9), "wrapAzDeg(-180) maps to +180");
+        check(near(wrapAzDeg(45.0), 45.0, 1e-9), "in-range azimuth unchanged");
+        check(near(clampElDeg(100.0), 90.0, 1e-9) && near(clampElDeg(-100.0), -90.0, 1e-9),
+              "elevation clamped to +/-90");
+
+        Model m; m.sampleRate = 48000; m.durationSec = 1.0;
+        Object o; o.name = "Sweep"; o.objectNumber = 1; o.coord = Coord::Spherical;
+        Block b; b.rtime = 0; b.duration = 0; b.az = 270; b.el = 100; b.dist = -0.5; b.gain = 1;
+        o.blocks = {b};
+        m.objects.push_back(o);
+        const std::string x = buildAxml(m);
+        check(x.find("coordinate=\"azimuth\">-90<") != std::string::npos,
+              "az 270 serialized as -90 (EAR-legal domain)");
+        check(x.find(">270<") == std::string::npos, "out-of-range azimuth never emitted");
+        check(x.find("coordinate=\"elevation\">90<") != std::string::npos, "el 100 clamped to 90");
+        check(x.find("coordinate=\"distance\">0<") != std::string::npos, "negative distance floored at 0");
+    }
+
+    // ---- (11) W-2: LFE frequency element lives on audioChannelFormat, not in the block ----
+    {
+        Model m; m.sampleRate = 48000; m.durationSec = 0.5;
+        addBed(m, "5.1", {"L","R","C","LFE","Ls","Rs"});
+        const std::string x = buildAxml(m);
+        const size_t cfLfe = x.find("audioChannelFormatName=\"LFE\"");
+        check(cfLfe != std::string::npos, "LFE channel format present");
+        const size_t freq = x.find("<frequency typeDefinition=\"lowPass\">120</frequency>", cfLfe);
+        const size_t blk = x.find("<audioBlockFormat", cfLfe);
+        check(freq != std::string::npos && blk != std::string::npos && freq < blk,
+              "frequency emitted BEFORE the block (audioChannelFormat child, 2094 shape)");
+        const size_t blkEnd = x.find("</audioBlockFormat>", blk);
+        check(blkEnd != std::string::npos &&
+              x.substr(blk, blkEnd - blk).find("<frequency") == std::string::npos,
+              "no frequency element inside the block");
+    }
+
+    // ---- (12) W-3: BW64 ds64 carries the real riffSize ----
+    {
+        Model m; m.sampleRate = 48000; m.durationSec = 0.1;
+        addBed(m, "5.1", {"L","R","C","LFE","Ls","Rs"});
+        WriteResult w = writeAdmImage(m, silentChannels(6, 4800), 4800, /*force BW64*/ 100);
+        check(w.ok && w.bw64, "BW64 fixture writes");
+        const uint64_t rs = rdLE64(w.bytes, 20);
+        check(rs == (uint64_t)w.bytes.size() - 8, "ds64.riffSize == filesize - 8");
+    }
+
+    // ---- (13) I-5/I-6: per-channel summary + audioFormatExtended version readout ----
+    {
+        Model m; m.sampleRate = 48000; m.durationSec = 0.5;
+        addBed(m, "5.1", {"L","R","C","LFE","Ls","Rs"});
+        m.objects.push_back(movingObject("Obj", 1, Coord::Spherical));
+        ParseResult pr = parseAdmImage(writeAdmImage(m, silentChannels(7, 24000), 24000).bytes);
+        check(pr.summary["adm"]["version"].get<std::string>() == "ITU-R_BS.2076-2",
+              "version readout = audioFormatExtended's, not the XML declaration's");
+        const Json& chans = pr.summary["adm"]["channels"];
+        check(chans.is_array() && chans.size() == 7, "channels summary: 7 entries");
+        check(chans[0]["name"] == "L" && chans[0]["typeDefinition"] == "DirectSpeakers" &&
+              chans[0]["speakerLabel"] == "M+030" && chans[0]["blocks"].get<int>() == 1,
+              "channels[0] = bed L / M+030 / 1 block");
+        check(chans[6]["typeDefinition"] == "Objects" && chans[6]["coordinate"] == "spherical" &&
+              chans[6]["blocks"].get<int>() == 2, "channels[6] = spherical object, 2 blocks");
+        const Json& pt = pr.summary["packTypes"];
+        check(pt["directSpeakers"].get<int>() == 1 && pt["objects"].get<int>() == 1 &&
+              !pt["referencesCommonDefinitions"].get<bool>(),
+              "packTypes census: 1 DS pack + 1 object pack, custom IDs");
+    }
+
     if (g_failures == 0) std::fprintf(stderr, "\nALL ADM BWF TESTS PASSED\n");
     else std::fprintf(stderr, "\n%d ADM BWF TEST(S) FAILED\n", g_failures);
     return g_failures == 0 ? 0 : 1;

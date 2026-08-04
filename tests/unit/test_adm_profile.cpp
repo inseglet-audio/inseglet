@@ -203,6 +203,114 @@ int main() {
         check(hasViolation(rep, "sample_rate"), "file: flags 44.1k sample rate");
     }
 
+    // ---- (10) I-4: the interpolationLength RAMP is verified, not just presence ----
+    {
+        // A 2-block profile object: 0 then 250/48000 — conformant.
+        Model m; m.sampleRate = 48000; m.bitDepth = 24; m.durationSec = 1.0;
+        Object o; o.name = "Mover"; o.coord = Coord::Cartesian;
+        Block b0; b0.rtime = 0; b0.duration = 0.5; b0.az = 45; b0.el = 0; b0.dist = 1;
+        Block b1 = b0; b1.rtime = 0.5; b1.az = -45;
+        o.blocks = {b0, b1};
+        m.objects.push_back(o);
+        m.dolbyProfile = true;
+        WriteResult wr = writeAdmImage(m, silent(1, 48000), 48000);
+        profile::Report ok = profile::validateParsed(parseAdmImage(wr.bytes));
+        check(ok.conformant, "0-then-250-samples ramp validates clean");
+
+        // Same bytes with the subsequent value forced to 0.0 (same-length patch): ramp violation.
+        std::string bad = wr.bytes;
+        const std::string from = "interpolationLength=\"0.005208\"";
+        const std::string to   = "interpolationLength=\"0.000000\"";
+        size_t p = bad.find(from);
+        check(p != std::string::npos, "patchable ramp value present");
+        bad.replace(p, from.size(), to);
+        profile::Report rb = profile::validateParsed(parseAdmImage(bad));
+        check(hasViolation(rb, "interpolation_ramp"),
+              "flat 0.0 'ramp' (the jump-file shape) flags interpolation_ramp");
+        check(!hasViolation(rb, "interpolation"), "presence check not double-fired");
+    }
+
+    // ---- (11) I-2: file-level bed channel-count gate on custom packs ----
+    {
+        Model m; m.sampleRate = 48000; m.bitDepth = 24; m.durationSec = 0.5;
+        m.bedLayoutName = "5.1";  // legal NAME, illegal 4-channel roster (quad-shaped)
+        for (const char* l : {"L", "R", "Ls", "Rs"}) {
+            BedSpeaker s; s.label = l;
+            SpeakerPos p = speakerPosFor("5.1", l);
+            s.az = p.az; s.el = p.el; s.speakerLabel = p.speakerLabel;
+            m.bed.push_back(s);
+        }
+        WriteResult wr = writeAdmImage(m, silent(4, 24000), 24000);
+        profile::Report rep = profile::validateParsed(parseAdmImage(wr.bytes));
+        check(hasViolation(rep, "bed_layout"), "4-channel custom bed pack flags bed_layout");
+
+        // A 6-channel custom bed passes the gate but carries the identity-unverified note.
+        Model m2; m2.sampleRate = 48000; m2.bitDepth = 24; m2.durationSec = 0.5;
+        addBed712(m2); m2.bed.resize(6); m2.bedLayoutName = "5.1";
+        profile::Report r2 = profile::validateParsed(
+            parseAdmImage(writeAdmImage(m2, silent(6, 24000), 24000).bytes));
+        check(!hasViolation(r2, "bed_layout"), "6-channel custom bed passes the count gate");
+        bool noted = false;
+        for (const auto& n : r2.notes) if (n.find("unverified") != std::string::npos) noted = true;
+        check(noted, "count-compatible custom bed carries the identity-unverified note");
+    }
+
+    // ---- (12) I-3: single-programme + 24-bit rules ----
+    {
+        Model m; m.sampleRate = 48000; m.bitDepth = 24; m.durationSec = 0.5;
+        Object o; o.name = "Obj"; o.coord = Coord::Cartesian;
+        Block b; b.rtime = 0; b.az = 0; b.el = 0; b.dist = 1; o.blocks = {b};
+        m.objects.push_back(o); m.dolbyProfile = true;
+        WriteResult wr = writeAdmImage(m, silent(1, 24000), 24000);
+        ParseResult pr = parseAdmImage(wr.bytes);
+        pr.axml += "<audioProgramme audioProgrammeID=\"APR_1002\"></audioProgramme>";
+        profile::Report rep = profile::validateParsed(pr);
+        check(hasViolation(rep, "programme_count"), "second audioProgramme flags programme_count");
+
+        Model m16 = m; m16.bitDepth = 16;
+        profile::Report r16 = profile::validateParsed(
+            parseAdmImage(writeAdmImage(m16, silent(1, 24000), 24000).bytes));
+        check(hasViolation(r16, "bit_depth"), "16-bit file flags bit_depth (profile masters are 24-bit)");
+    }
+
+    // ---- (13) I-1: common-definitions classification from chna packRef IDs ----
+    {
+        check(profile::commonDefBedFor("AP_00010003") != nullptr &&
+              profile::commonDefBedFor("AP_00010003")->atmosAllowed, "AP_00010003 = 5.1, allowed");
+        check(profile::commonDefBedFor("AP_00010016") != nullptr &&
+              profile::commonDefBedFor("AP_00010016")->atmosAllowed, "AP_00010016 = 7.1.2, allowed");
+        check(profile::commonDefBedFor("AP_00010005") != nullptr &&
+              !profile::commonDefBedFor("AP_00010005")->atmosAllowed, "AP_00010005 = 5.1.4, rejected");
+        check(profile::commonDefBedFor("AP_00011001") == nullptr, "custom pack not in the table");
+
+        // Synthesized parse summaries: common-def references only (nothing inline) are now SEEN.
+        auto mkParse = [](const std::string& packRef, int nTracks) {
+            ParseResult pr;
+            pr.ok = true;
+            Json tracks = Json::array();
+            for (int i = 0; i < nTracks; ++i)
+                tracks.push_back(Json{{"trackIndex", i + 1}, {"uid", "ATU_00000001"},
+                                      {"trackRef", "AT_00010001_01"}, {"packRef", packRef}});
+            pr.summary = Json{
+                {"isAdm", true},
+                {"format", Json{{"channels", nTracks}, {"sampleRate", 48000.0}, {"bitDepth", 24}}},
+                {"chna", Json{{"numTracks", nTracks}, {"numUIDs", nTracks}, {"tracks", tracks}}},
+                {"adm", Json{{"audioObjects", 1}, {"hasDirectSpeakers", false}, {"hasObjects", false},
+                             {"coordinateMode", "spherical"}, {"hasObjectDivergence", false},
+                             {"hasImportance", false}}}};
+            pr.axml = "<audioFormatExtended version=\"ITU-R_BS.2076-2\">"
+                      "<audioProgramme audioProgrammeID=\"APR_1001\"></audioProgramme>"
+                      "</audioFormatExtended>";
+            return pr;
+        };
+        profile::Report hoa = profile::validateParsed(mkParse("AP_00040001", 4));
+        check(hasViolation(hoa, "content_type"), "common-def HOA pack flags content_type");
+        profile::Report b514 = profile::validateParsed(mkParse("AP_00010005", 10));
+        check(hasViolation(b514, "bed_layout"), "common-def 5.1.4 bed flags bed_layout");
+        profile::Report b51 = profile::validateParsed(mkParse("AP_00010003", 6));
+        check(b51.conformant, "common-def 5.1 bed at 48k/24-bit validates clean");
+    }
+
     if (g_failures == 0) std::fprintf(stderr, "\nALL ADM PROFILE TESTS PASSED\n");
     else std::fprintf(stderr, "\n%d ADM PROFILE TEST(S) FAILED\n", g_failures);
     return g_failures == 0 ? 0 : 1;

@@ -18,6 +18,21 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.5.1" author="James Livingston" time="2026-08-04T00:00:00Z">
+        <changelog><![CDATA[Correctness-first patch release; no surface change (186 tools).
+BS.1770-4 bed channel weights now read Tables 4/5 exactly (boundary-inclusive: 1.41 only at
+ear level within |az| 60-120): rear surrounds Lsr/Rsr (M+/-135) 1.41 -> 1.00; wides Lw/Rw
+(M+/-060, 9.1.6) 1.00 -> 1.41. Every loudness tool inherits; 7.1-family readings move
+<= ~1.5 dB of affected-channel contribution; 5.1/stereo/22.2 unchanged.
+ADM hardening: writer azimuth wrap + elevation clamp + distance floor at spherical
+serialization; LFE <frequency> at its BS.2076 home (audioChannelFormat); real ds64.riffSize
+on BW64. adm_profile_check now classifies common-definitions ADM (previously invisible:
+HOA/binaural/multi-programme/oversize beds correctly non-conformant), gates bed layouts
+against the BS.2094 table, enforces single-programme + 24-bit, and verifies the
+interpolationLength ramp (new code: interpolation_ramp). adm_inspect gains a per-channel
+summary + packTypes census and a corrected version readout.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.5.1/reaper_mcp.dylib</source>
+      </version>
       <version name="1.5.0" author="James Livingston" time="2026-07-11T00:00:00Z">
         <changelog><![CDATA[First public macOS release.
 In-process MCP server (Streamable HTTP + SSE, JSON-RPC 2.0, MCP 2025-06-18); loopback-only

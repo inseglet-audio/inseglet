@@ -165,9 +165,15 @@ and proven in `unit.meter`.
   `l_j = −0.691 + 10·log₁₀(Σ_ch G_ch·z̄²_ch,j)`; **absolute gate** −70 LKFS, then **relative gate** 10 LU
   below the mean power of the surviving blocks. A range shorter than one block falls back to the ungated
   measure. `activityFraction` = surviving blocks / total blocks.
-- **Channel weights `G`** come from the §2 SMPTE bed labels: fronts + heights + wides **1.0**, surrounds
-  (`Ls/Rs/Lss/Rss/Lsr/Rsr`) **1.41**, **LFE excluded** (weight 0; index 3, and 9 for 22.2). Unlabeled
-  widths weigh every channel 1.0.
+- **Channel weights `G`** come from the §2 SMPTE bed labels per **BS.1770-4 Tables 4/5, read exactly**
+  (`src/bed_weights.h`): **1.41** only at ear level within the **60°–120° azimuth band, inclusive** —
+  `Ls/Rs` (±110°), `Lss/Rss` (±90°), and `Lw/Rw` (±60°, boundary-inclusive); **rear surrounds
+  `Lsr/Rsr` (±135°) and every height 1.0**; **LFE excluded** (weight 0; index 3, and 9 for 22.2).
+  22.2 weighs every non-LFE channel 1.0 (its interleave is renderer-dependent — §1 caveat — so
+  per-index Table-5 weights would guess at channel identity); unlabeled widths weigh every channel 1.0.
+  The weight multiplies power (`w·z²`), so 1.41 ≈ +1.5 dB. (Until 2026-08-04 `Lsr/Rsr` were wrongly
+  1.41 and `Lw/Rw` wrongly 1.0 — the F33 class; readings on rear/wide-bearing beds moved ≤ ~1.5 dB
+  of the affected channels' contribution when this was corrected.)
 - **Dialog loudness (`analysis.dialog_loudness`).** Dialog level = the gated loudness of the **isolated
   dialog stem** (bit-exact stem render): the gates drop inter-phrase silence, so the number approximates
   speech-active level. This is an honest approximation — valid when the stem carries dialog only — and is

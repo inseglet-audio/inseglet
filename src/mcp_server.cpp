@@ -29,7 +29,7 @@ namespace {
 
 constexpr char kProtocolVersion[] = "2025-06-18";
 constexpr char kServerName[] = "reaper_mcp";
-constexpr char kServerVersion[] = "1.5.0";
+constexpr char kServerVersion[] = "1.5.1";
 
 std::string randomHex(int bytes) {
     std::random_device rd;

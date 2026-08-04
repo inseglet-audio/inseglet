@@ -64,6 +64,46 @@ inline bool bedLayoutAllowed(const std::string& name) {
     return name.empty() || name == "5.1" || name == "7.1" || name == "7.1.2";
 }
 
+// Profile-legal bed channel counts (2.0/3.0/5.0/5.1/7.0/7.1/7.0.2/7.1.2) — the file-level gate for
+// CUSTOM DirectSpeakers packs, where only the chna track count is knowable. A count in this set is
+// necessary, not sufficient (a 10-ch 5.1.4 collides with 7.1.2) — such packs pass with a note.
+inline bool bedChannelCountAllowed(int n) {
+    return n == 2 || n == 3 || n == 5 || n == 6 || n == 7 || n == 8 || n == 9 || n == 10;
+}
+
+// BS.2094 common-definitions DirectSpeakers packs (IDs and layouts are the published standard's
+// data; channel counts from the common-definitions XML). atmosAllowed = the layout is one of the
+// profile's legal beds. An ID in this table settles the bed question exactly — no count ambiguity.
+struct CommonDefBed { const char* id; const char* name; int channels; bool atmosAllowed; };
+inline const CommonDefBed* commonDefBedFor(const std::string& packId) {
+    static const CommonDefBed k[] = {
+        {"AP_00010001", "mono (0+1+0)",            1,  false},
+        {"AP_00010002", "stereo 2.0 (0+2+0)",      2,  true},
+        {"AP_0001000a", "3.0 (0+3+0)",             3,  true},
+        {"AP_0001000b", "4.0 quad (0+4+0)",        4,  false},
+        {"AP_0001000c", "5.0 (0+5+0)",             5,  true},
+        {"AP_00010003", "5.1 (0+5+0)",             6,  true},
+        {"AP_0001000d", "6.1 (0+6+0)",             7,  false},
+        {"AP_0001000e", "7.1front (0+7+0)",        8,  false},
+        {"AP_0001000f", "7.1back (0+7+0)",         8,  true},
+        {"AP_00010004", "7.1top / 5.1.2 (2+5+0)",  8,  false},
+        {"AP_00010012", "7.1side 5.1+sc (0+7+0)",  8,  false},
+        {"AP_00010013", "7.1topside 5.1.2 (2+5+0)",8,  false},
+        {"AP_00010014", "9.1screen 5.1.2+sc",      10, false},
+        {"AP_00010016", "9.1 / 7.1.2 (2+7+0)",     10, true},
+        {"AP_00010005", "9.1 / 5.1.4 (4+5+0)",     10, false},
+        {"AP_00010010", "10.1 (4+5+1)",            11, false},
+        {"AP_00010007", "10.2 (3+7+0)",            12, false},
+        {"AP_00010015", "11.1 5.1.4+sc (4+7+0)",   12, false},
+        {"AP_00010017", "11.1 / 7.1.4 (4+7+0)",    12, false},
+        {"AP_00010008", "13.1 (4+9+0)",            14, false},
+        {"AP_00010011", "Auro-3D (9+9+0)",         19, false},
+        {"AP_00010009", "22.2 (9+10+3)",           24, false},
+    };
+    for (const auto& e : k) if (packId == e.id) return &e;
+    return nullptr;
+}
+
 // ---- report types -------------------------------------------------------------------------------
 struct Violation {
     std::string code;
@@ -207,6 +247,10 @@ inline Report validateModel(const Model& m) {
 }
 
 // ---- validateParsed — inspect a PARSED ADM file (analysis.adm_profile_check) --------------------
+// Hardened per the cross-validation findings (I-1..I-4): pack types are classified from the
+// chna packRef IDs (so BS.2094 common-definitions content — the dominant broadcast dialect, which
+// defines nothing inline — is no longer invisible), the bed cap / single-programme / 24-bit rules
+// are enforced, and the interpolationLength check verifies the actual 0-then-250-samples ramp.
 inline Report validateParsed(const ParseResult& pr) {
     Report r;
     const Json& s = pr.summary;
@@ -223,23 +267,86 @@ inline Report validateParsed(const ParseResult& pr) {
     if (sr != kSampleRate)
         r.violations.push_back({"sample_rate", "sampleRate " + std::to_string(sr) + " != 48000"});
 
+    // bit depth (I-3: the profile's masters are 24-bit PCM)
+    const int bits = fmt.contains("bitDepth") ? fmt["bitDepth"].get<int>() : 0;
+    if (bits != 24)
+        r.violations.push_back({"bit_depth", "bitDepth " + std::to_string(bits) + " != 24"});
+
     // channel cap
     const int ch = fmt.contains("channels") ? fmt["channels"].get<int>() : 0;
     if (ch > kMaxChannels)
         r.violations.push_back({"channel_cap", std::to_string(ch) + " channels > 128"});
 
-    // object cap (audioObjects minus the bed audioObject, if any)
-    if (admS.is_object()) {
+    // ---- pack classification from chna (I-1): per-pack track counts + type census ----
+    std::vector<std::pair<std::string, int>> packCount;   // distinct packRef -> #tracks
+    int nObjPacks = 0, nHOA = 0, nBin = 0, nMatrix = 0;
+    bool sawDS = false;
+    if (s.contains("chna") && s["chna"].is_object() && s["chna"].contains("tracks")) {
+        for (const auto& t : s["chna"]["tracks"]) {
+            const std::string prf = t.value("packRef", std::string());
+            if (prf.size() < 11 || prf.compare(0, 3, "AP_") != 0) continue;
+            bool found = false;
+            for (auto& pc : packCount)
+                if (pc.first == prf) { ++pc.second; found = true; break; }
+            if (!found) packCount.push_back({prf, 1});
+        }
+        for (const auto& pc : packCount) {
+            const std::string type = pc.first.substr(3, 4);
+            if      (type == "0001") sawDS = true;
+            else if (type == "0002") ++nMatrix;
+            else if (type == "0003") ++nObjPacks;
+            else if (type == "0004") ++nHOA;
+            else if (type == "0005") ++nBin;
+        }
+    }
+
+    // content types (I-1): the profile's content is DirectSpeakers beds + Objects, nothing else
+    if (nHOA > 0)
+        r.violations.push_back({"content_type", std::to_string(nHOA) + " HOA pack(s) — the profile carries beds + objects only"});
+    if (nBin > 0)
+        r.violations.push_back({"content_type", "binaural pack present — the profile carries beds + objects only"});
+    if (nMatrix > 0)
+        r.violations.push_back({"content_type", "Matrix pack present — the profile carries beds + objects only"});
+
+    // bed layouts (I-2): common-definitions packs settle exactly; custom packs gate on track count
+    for (const auto& pc : packCount) {
+        if (pc.first.compare(0, 7, "AP_0001") != 0) continue;
+        if (const CommonDefBed* cd = commonDefBedFor(pc.first)) {
+            if (!cd->atmosAllowed)
+                r.violations.push_back({"bed_layout", "bed " + pc.first + " = " + cd->name +
+                                                          " is not an Atmos bed (max 7.1.2)"});
+            else
+                r.notes.push_back("bed " + pc.first + " = " + std::string(cd->name) +
+                                  " (common definitions).");
+        } else if (!bedChannelCountAllowed(pc.second)) {
+            r.violations.push_back({"bed_layout", "bed " + pc.first + " has " +
+                                                      std::to_string(pc.second) +
+                                                      " channels — not a profile bed layout"});
+        } else {
+            r.notes.push_back("bed " + pc.first + " layout identity unverified (count-compatible, " +
+                              std::to_string(pc.second) + " ch).");
+        }
+    }
+
+    const bool hasObjects = (admS.is_object() && admS.value("hasObjects", false)) || nObjPacks > 0;
+    const bool hasBed = sawDS || (admS.is_object() && admS.value("hasDirectSpeakers", false));
+
+    // object cap: distinct Objects packs when chna is decodable (1 pack per object in both the
+    // Dolby dialect and this writer); fall back to the audioObject count arithmetic otherwise
+    if (nObjPacks > 0) {
+        if (nObjPacks > kMaxObjects)
+            r.violations.push_back({"object_cap", std::to_string(nObjPacks) + " objects > 118"});
+    } else if (admS.is_object()) {
         const int nObjTot = admS.value("audioObjects", 0);
-        const bool hasBed = admS.value("hasDirectSpeakers", false);
         const int nObjects = nObjTot - (hasBed ? 1 : 0);
         if (nObjects > kMaxObjects)
             r.violations.push_back({"object_cap", std::to_string(nObjects) + " objects > 118"});
-        if (!hasBed && admS.value("hasObjects", false)) r.notes.push_back("objects-only (no bed).");
+    }
+    if (!hasBed && hasObjects) r.notes.push_back("objects-only (no bed).");
 
+    if (admS.is_object()) {
         // objects must be cartesian
-        if (admS.value("hasObjects", false) &&
-            admS.value("coordinateMode", std::string()) != "cartesian")
+        if (hasObjects && admS.value("coordinateMode", std::string()) != "cartesian")
             r.violations.push_back({"coordinate", "objects are not in cartesian coordinates"});
 
         // divergence prohibited
@@ -257,10 +364,15 @@ inline Report validateParsed(const ParseResult& pr) {
         }
     }
 
-    // programme ID (axml scan)
-    if (!pr.axml.empty() &&
-        pr.axml.find(std::string("audioProgrammeID=\"") + kProgrammeID + "\"") == std::string::npos)
-        r.violations.push_back({"programme_id", "audioProgramme ID is not APR_1001"});
+    // programme ID + single-programme rule (I-3)
+    if (!pr.axml.empty()) {
+        if (pr.axml.find(std::string("audioProgrammeID=\"") + kProgrammeID + "\"") == std::string::npos)
+            r.violations.push_back({"programme_id", "audioProgramme ID is not APR_1001"});
+        const int nProg = countOccur(pr.axml, "<audioProgramme ");
+        if (nProg > 1)
+            r.violations.push_back({"programme_count", std::to_string(nProg) +
+                                                           " audioProgrammes — the profile carries exactly one"});
+    }
 
     // extent identical: the ordered width/height/depth element values must match
     if (!pr.axml.empty()) {
@@ -275,11 +387,51 @@ inline Report validateParsed(const ParseResult& pr) {
         if (!extentOk)
             r.violations.push_back({"extent", "object extent is not identical width=depth=height"});
 
-        // interpolationLength presence (only meaningful when objects carry a trajectory)
-        if (admS.is_object() && admS.value("hasObjects", false) &&
-            pr.axml.find("interpolationLength") == std::string::npos)
-            r.violations.push_back({"interpolation",
-                                    "objects carry no interpolationLength (profile: 0 then 250 samples)"});
+        // interpolationLength (I-4): presence, then the actual ramp — 0 on the first block of each
+        // object channel, 250 samples on every subsequent one
+        if (hasObjects) {
+            if (pr.axml.find("interpolationLength") == std::string::npos) {
+                r.violations.push_back({"interpolation",
+                                        "objects carry no interpolationLength (profile: 0 then 250 samples)"});
+            } else {
+                const double want = (double)kInterpSubsequentSamples / (double)(sr > 0 ? sr : kSampleRate);
+                bool rampBad = false;
+                std::string rampDetail;
+                size_t pos = 0;
+                while (!rampBad && (pos = pr.axml.find("<audioChannelFormat ", pos)) != std::string::npos) {
+                    size_t end = pr.axml.find("</audioChannelFormat>", pos);
+                    if (end == std::string::npos) break;
+                    const std::string cf = pr.axml.substr(pos, end - pos);
+                    pos = end + 21;
+                    if (cf.find("typeDefinition=\"Objects\"") == std::string::npos) continue;
+                    size_t bp = 0;
+                    int k = 0;
+                    while (!rampBad && (bp = cf.find("<audioBlockFormat", bp)) != std::string::npos) {
+                        size_t be = cf.find("</audioBlockFormat>", bp);
+                        if (be == std::string::npos) be = cf.size();
+                        const std::string bf = cf.substr(bp, be - bp);
+                        bp = be;
+                        const auto il = extractAttr(bf, "interpolationLength");
+                        double v = -1.0;
+                        if (!il.empty()) { try { v = std::stod(il[0]); } catch (...) { v = -1.0; } }
+                        if (k == 0) {
+                            if (!il.empty() && !(v >= 0.0 && v < 1e-9)) {
+                                rampBad = true;
+                                rampDetail = "first block interpolationLength " + il[0] + " != 0";
+                            }
+                        } else if (il.empty() || v < 0.0 || std::fabs(v - want) > 1e-4) {
+                            rampBad = true;
+                            rampDetail = "subsequent block interpolationLength " +
+                                         (il.empty() ? std::string("missing") : il[0]) + " != " +
+                                         fmtNum(want) + " (250 samples)";
+                        }
+                        ++k;
+                    }
+                }
+                if (rampBad)
+                    r.violations.push_back({"interpolation_ramp", rampDetail});
+            }
+        }
     }
 
     r.conformant = r.violations.empty();

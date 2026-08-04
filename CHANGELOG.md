@@ -6,6 +6,41 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.5.1] — 2026-08-04
+
+Correctness-first patch release; no surface change (186 tools).
+
+### Fixed
+- **BS.1770-4 bed channel weights are now read from Tables 4/5 exactly** (boundary-inclusive:
+  the 1.41 surround weight applies only at ear level within |az| 60°–120°). Two cells move:
+  rear surrounds `Lsr/Rsr` (M±135) 1.41 → 1.00, and wides `Lw/Rw` (M±060, 9.1.6 — exactly on
+  the inclusive boundary) 1.00 → 1.41. Every loudness tool inherits (meter, stem / dialog /
+  object loudness, loudness timelines, deliverable checks). Readings move only where the
+  affected channels carry energy: rear-bearing 7.1-family content reads cooler (equal-energy
+  7.1.4 ≈ 0.3 LU), 9.1.6 wide-bearing content warmer; 5.1 / stereo / 22.2 are unchanged
+  (22.2 stays documented-unweighted). The weight table now lives in an SDK-free
+  `src/bed_weights.h`, pinned by the new `unit.bed_weights` suite whose expected vectors
+  mirror iamf-sentinel-pro's independently published BS.1770-4 conformance test; a negative
+  control fails at exactly the four moved cells, and the power-domain delta is
+  1.4922 dB = 10·log₁₀(1.41).
+- **ADM writer**: object azimuths wrap to (−180°, 180°] and elevations clamp to ±90° at
+  spherical block serialization (an az = 270° trajectory no longer produces a file the EBU
+  EAR renderer hard-rejects); the LFE `<frequency>` element is emitted at its BS.2076
+  position as an `audioChannelFormat` child; BW64 output carries the real `ds64.riffSize`
+  instead of 0.
+
+### Changed
+- **`analysis.adm_profile_check`** classifies pack types from chna packRef IDs, so
+  common-definitions ADM is no longer invisible: HOA / binaural / Matrix content, beds beyond
+  the profile's list, multi-programme and non-24-bit files now correctly report
+  non-conformant (previously they blind-passed). Bed layouts gate against the published
+  BS.2094 common-definitions table plus a channel-count check, and the interpolation check
+  verifies the actual per-block ramp (new violation code `interpolation_ramp`, distinct from
+  presence). **Verdicts CHANGE on common-definitions ADM** — third-party masters that
+  previously "passed" may now correctly fail.
+- **`analysis.adm_inspect`** reports a bounded per-channel summary (`adm.channels[]`), a
+  `packTypes` census (with a common-definitions flag), and a corrected ADM `version` readout.
+
 ### Fixed
 - Version reporting: the MCP `initialize` handshake now reports `serverInfo.version` as the package
   version; it had been hardcoded to an early `0.1.0` and was out of sync with the discovery file and the

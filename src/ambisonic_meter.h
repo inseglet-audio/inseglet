@@ -396,9 +396,11 @@ inline std::vector<SilentRegion> scanSilence(const AudioBuffer& buf, double thre
 // The C++ loudness path for signals REAPER's RENDER_STATS cannot measure directly: stems read back
 // from a bit-exact render, dialog buses, and downmixes that exist only in memory. Program loudness of
 // a rendered master stays REAPER-native; these functions carry the per-stem / dialog /
-// timeline metrics. Channel weighting follows BS.1770-4: G = 1.0 for front channels, 1.41 for
-// surrounds, LFE excluded — the tool layer derives the weight vector from the SMPTE bed labels and
-// passes it in (empty weights = all 1.0).
+// timeline metrics. Channel weighting follows BS.1770-4 Tables 4/5 exactly (F33): G = 1.41
+// ONLY for ear-level channels with |az| 60°–120° inclusive (Ls/Rs ±110, Lss/Rss ±90, Lw/Rw ±60);
+// rear surrounds (Lsr/Rsr ±135) and all heights 1.0; LFE excluded (0). The weight multiplies POWER
+// (w·z² below, so 1.41 ≈ +1.5 dB). The tool layer derives the vector from the SMPTE bed labels via
+// bed_weights.h and passes it in (empty weights = all 1.0).
 // ------------------------------------------------------------------------------------------------
 
 // Per-sample K-weighted, channel-weighted power series p[i] = sum_ch G_ch * z_ch[i]^2 (z = K-filtered).

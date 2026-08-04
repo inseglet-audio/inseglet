@@ -43,6 +43,7 @@
 #include "../render_stems.h"     // shared bounded stem-render helpers (temp render + sample read-back)
 #include "../deliverable_specs.h"// the named deliverable specs + the pure pass/fail evaluator
 #include "../ambisonic_meter.h"  // metering DSP (WAV read + per-channel + ambisonic field)
+#include "../bed_weights.h"     // SMPTE bed labels + BS.1770-4 channel weights (F33)
 #include "../audio_accessor.h"   // render-free direct sample reads (accessor -> meter::AudioBuffer)
 #include "../adm_bwf.h"          // ADM (BS.2076) parse + summarize for analysis.adm_inspect
 #include "../adm_profile.h"      // Dolby Atmos Master ADM Profile conformance validator
@@ -54,59 +55,6 @@
 namespace reaper_mcp {
 
 namespace {
-
-// ---- Bed-layout labeling (SDK-free; CONVENTIONS §1/§2) ------------------------------------------
-// Best-effort SMPTE channel labels for the immersive bed widths, so per-channel metering reads as
-// "C / LFE / Lss / Ltf" rather than bare indices. LFE lives at channel index 3 (and index 9 for 22.2)
-// — those channels are excluded from BS.1770 program loudness.
-inline std::string bedLayoutName(int nch) {
-    switch (nch) {
-        case 1:  return "mono";
-        case 2:  return "stereo";
-        case 6:  return "5.1";
-        case 8:  return "7.1";
-        case 12: return "7.1.4";
-        case 16: return "9.1.6";
-        case 24: return "22.2";
-        default: return "multichannel";
-    }
-}
-inline std::vector<std::string> bedChannelLabels(int nch) {
-    switch (nch) {
-        case 1:  return {"M"};
-        case 2:  return {"L", "R"};
-        case 6:  return {"L", "R", "C", "LFE", "Ls", "Rs"};
-        case 8:  return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr"};
-        case 12: return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr",
-                         "Ltf", "Rtf", "Ltr", "Rtr"};
-        case 16: return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr",
-                         "Lw", "Rw", "Ltf", "Rtf", "Ltr", "Rtr", "Ltm", "Rtm"};
-        default: break;
-    }
-    std::vector<std::string> v;
-    v.reserve(nch);
-    for (int i = 0; i < nch; ++i) v.push_back("ch" + std::to_string(i));
-    return v;
-}
-inline bool bedChannelIsLFE(int nch, int idx) {
-    if (nch >= 6 && idx == 3) return true;      // LFE1 (all beds with an LFE)
-    if (nch == 24 && idx == 9) return true;     // 22.2 LFE2
-    return false;
-}
-
-// BS.1770-4 channel weights G for the C++ gated-loudness path: fronts + heights 1.0, surrounds 1.41,
-// LFE excluded (0). Unknown/generic layouts weigh every channel 1.0 (no LFE detectable).
-inline std::vector<double> bedChannelWeights(int nch) {
-    const std::vector<std::string> labels = bedChannelLabels(nch);
-    std::vector<double> w((size_t)std::max(nch, 0), 1.0);
-    for (int i = 0; i < nch; ++i) {
-        if (bedChannelIsLFE(nch, i)) { w[i] = 0.0; continue; }
-        const std::string& L = labels[i];
-        if (L == "Ls" || L == "Rs" || L == "Lss" || L == "Rss" || L == "Lsr" || L == "Rsr")
-            w[i] = 1.41;
-    }
-    return w;
-}
 
 // ITU-R BS.775-style stereo fold-down matrix from the SMPTE bed labels: L/R pass at 0 dB, C at -3 dB
 // to both sides, every other labeled channel folds to its side at -3 dB (surrounds per BS.775;

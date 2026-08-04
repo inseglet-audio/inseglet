@@ -36,6 +36,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -166,6 +167,19 @@ inline std::string fmtNum(double v) {
     return s;
 }
 
+// BS.2076 position domains: azimuth -180..+180, elevation -90..+90, distance >= 0. The writer
+// normalizes at serialization time so a panner-sampled value (an automation sweep hands the tool
+// az 270 as readily as az -90) can never produce a file a spec-strict reader rejects — EAR
+// hard-fails the whole file on an out-of-range azimuth (found in the cross-validation, W-1).
+inline double wrapAzDeg(double az) {
+    double a = std::fmod(az + 180.0, 360.0);
+    if (a < 0) a += 360.0;
+    a -= 180.0;                    // now in [-180, 180)
+    if (a == -180.0) a = 180.0;    // single canonical form for the rear pole
+    return a;
+}
+inline double clampElDeg(double el) { return el < -90.0 ? -90.0 : (el > 90.0 ? 90.0 : el); }
+
 // az/el/dist (spherical, az +left deg) -> ADM cartesian X(+right)/Y(+front)/Z(+up), each ~[-1,1].
 inline void sphToCart(double azDeg, double elDeg, double dist, double& X, double& Y, double& Z) {
     const double a = azDeg * M_PI / 180.0, e = elDeg * M_PI / 180.0;
@@ -293,12 +307,15 @@ inline std::string buildAxml(const Model& m) {
             x += "        <audioChannelFormat audioChannelFormatID=\"" + acId +
                  "\" audioChannelFormatName=\"" + xmlEscape(s.label) +
                  "\" typeLabel=\"0001\" typeDefinition=\"DirectSpeakers\">\n";
+            if (s.lfe) {
+                // frequency is an audioChannelFormat sub-element (BS.2076; mirrors the BS.2094
+                // common-definitions LFE channel). Emitting it inside the block was W-2:
+                // spec-strict readers (EAR) ignore it there and warn on the label/frequency mismatch.
+                x += "          <frequency typeDefinition=\"lowPass\">120</frequency>\n";
+            }
             x += "          <audioBlockFormat audioBlockFormatID=\"AB_0001" + hex4(0x1001 + (unsigned)i) +
                  "_00000001\">\n";
             x += "            <speakerLabel>" + std::string(s.speakerLabel) + "</speakerLabel>\n";
-            if (s.lfe) {
-                x += "            <frequency typeDefinition=\"lowPass\">120</frequency>\n";
-            }
             x += "            <position coordinate=\"azimuth\">" + fmtNum(s.az) + "</position>\n";
             x += "            <position coordinate=\"elevation\">" + fmtNum(s.el) + "</position>\n";
             x += "            <position coordinate=\"distance\">1</position>\n";
@@ -359,9 +376,10 @@ inline std::string buildAxml(const Model& m) {
                 x += "            <position coordinate=\"Y\">" + fmtNum(Y) + "</position>\n";
                 x += "            <position coordinate=\"Z\">" + fmtNum(Z) + "</position>\n";
             } else {
-                x += "            <position coordinate=\"azimuth\">" + fmtNum(b.az) + "</position>\n";
-                x += "            <position coordinate=\"elevation\">" + fmtNum(b.el) + "</position>\n";
-                x += "            <position coordinate=\"distance\">" + fmtNum(b.dist) + "</position>\n";
+                // W-1: emit only in-domain spherical positions (wrap az, clamp el, floor dist at 0).
+                x += "            <position coordinate=\"azimuth\">" + fmtNum(wrapAzDeg(b.az)) + "</position>\n";
+                x += "            <position coordinate=\"elevation\">" + fmtNum(clampElDeg(b.el)) + "</position>\n";
+                x += "            <position coordinate=\"distance\">" + fmtNum(b.dist < 0.0 ? 0.0 : b.dist) + "</position>\n";
             }
             if (b.width > 0 || b.height > 0 || b.depth > 0) {
                 x += "            <width>" + fmtNum(b.width) + "</width>\n";
@@ -556,8 +574,10 @@ inline WriteResult writeAdmImage(const Model& m, const std::vector<std::vector<f
         putLE32(f, 0xFFFFFFFFu);  // RF64 sentinel
         f += "WAVE";
         // ds64: riffSize, dataSize, sampleCount (64-bit each) + tableLength(0).
+        // riffSize is patched to the real value after assembly (W-3; BS.2088 defines the
+        // field as the actual RIFF size — 0 happened to be tolerated by EAR but is non-conformant).
         std::string ds64;
-        putLE64(ds64, 0);          // riffSize (patched conceptually; readers use dataSize here)
+        putLE64(ds64, 0);          // riffSize placeholder — patched post-assembly below
         putLE64(ds64, dataSize);   // dataSize
         putLE64(ds64, (uint64_t)frames);  // sampleCount
         putLE32(ds64, 0);          // table length
@@ -578,6 +598,11 @@ inline WriteResult writeAdmImage(const Model& m, const std::vector<std::vector<f
         uint32_t riffSize = (uint32_t)(f.size() - 8);
         f[4] = (char)(riffSize & 0xFF); f[5] = (char)((riffSize >> 8) & 0xFF);
         f[6] = (char)((riffSize >> 16) & 0xFF); f[7] = (char)((riffSize >> 24) & 0xFF);
+    } else {
+        // W-3: patch the real riffSize into ds64 (payload begins at byte 20:
+        // "BW64"+sentinel+"WAVE" is 12 bytes, then "ds64"+size is 8 more).
+        const uint64_t riffSize64 = (uint64_t)f.size() - 8;
+        for (int i = 0; i < 8; ++i) f[20 + (size_t)i] = (char)((riffSize64 >> (8 * i)) & 0xFF);
     }
     r.bytes.swap(f);
     r.ok = true;
@@ -697,9 +722,88 @@ inline ParseResult parseAdmImage(const std::string& s) {
         chnaJson = Json{{"numTracks", numTracks}, {"numUIDs", numUIDs}, {"tracks", uids}};
     }
 
+    // Pack-type classification from chna packRefs (I-1, inspect half). The type is encoded
+    // in the ID itself (AP_yyyyxxxx: yyyy = typeLabel), and an index <= 0x0FFF is a BS.2094 common
+    // definition — so DirectSpeakers/HOA/binaural content is classifiable even when the file only
+    // REFERENCES common definitions and defines nothing inline (the dominant broadcast dialect,
+    // structurally invisible to the inline scans below).
+    Json packTypesJson = Json(nullptr);
+    if (chnaJson.is_object()) {
+        int nDS = 0, nObj = 0, nHOA = 0, nBin = 0, nMatrix = 0, nOther = 0;
+        bool commonDef = false;
+        std::vector<std::string> seen;
+        for (const auto& t : chnaJson["tracks"]) {
+            const std::string pr = t.value("packRef", std::string());
+            if (pr.size() < 11 || pr.compare(0, 3, "AP_") != 0) { if (!pr.empty()) ++nOther; continue; }
+            bool dup = false;
+            for (const auto& s2 : seen) if (s2 == pr) { dup = true; break; }
+            if (dup) continue;
+            seen.push_back(pr);
+            const std::string type = pr.substr(3, 4);
+            if      (type == "0001") ++nDS;
+            else if (type == "0002") ++nMatrix;
+            else if (type == "0003") ++nObj;
+            else if (type == "0004") ++nHOA;
+            else if (type == "0005") ++nBin;
+            else ++nOther;
+            const unsigned idx = (unsigned)std::strtoul(pr.substr(7, 4).c_str(), nullptr, 16);
+            if (idx <= 0x0FFF) commonDef = true;
+        }
+        packTypesJson = Json{{"directSpeakers", nDS}, {"objects", nObj}, {"hoa", nHOA},
+                             {"binaural", nBin}, {"matrix", nMatrix}, {"other", nOther},
+                             {"referencesCommonDefinitions", commonDef}};
+    }
+
     // axml summary (best-effort structural scan)
     Json admJson = Json(nullptr);
     if (haveAxml && !axml.empty()) {
+        // audioFormatExtended's own version attribute (I-6: a plain first-match scan for
+        // version= lands on the XML declaration's version="1.0" and always reports "1.0").
+        std::string afeVersion;
+        {
+            size_t p = axml.find("<audioFormatExtended");
+            if (p != std::string::npos) {
+                size_t e = axml.find('>', p);
+                if (e != std::string::npos) {
+                    auto v = extractAttr(axml.substr(p, e - p + 1), "version");
+                    if (!v.empty()) afeVersion = v[0];
+                }
+            }
+        }
+        // Per-channel readout (I-5): one bounded entry per inline audioChannelFormat —
+        // name, type, block count, first speakerLabel, coordinate flavour. No per-block data (a
+        // dense trajectory can carry thousands of blocks); deep extraction stays a harness concern.
+        Json channelsJson = Json::array();
+        {
+            size_t pos = 0;
+            int emitted = 0;
+            while ((pos = axml.find("<audioChannelFormat ", pos)) != std::string::npos) {
+                size_t end = axml.find("</audioChannelFormat>", pos);
+                if (end == std::string::npos) break;
+                const std::string cf = axml.substr(pos, end - pos);
+                if (emitted < 256) {
+                    auto nm = extractAttr(cf, "audioChannelFormatName");
+                    auto td = extractAttr(cf, "typeDefinition");
+                    std::string spk;
+                    size_t sl = cf.find("<speakerLabel>");
+                    if (sl != std::string::npos) {
+                        size_t se = cf.find("</speakerLabel>", sl);
+                        if (se != std::string::npos) spk = cf.substr(sl + 14, se - sl - 14);
+                    }
+                    const char* coord =
+                        (cf.find("<cartesian>1</cartesian>") != std::string::npos) ? "cartesian"
+                        : (cf.find("coordinate=\"azimuth\"") != std::string::npos) ? "spherical"
+                                                                                  : "none";
+                    channelsJson.push_back(Json{{"name", nm.empty() ? std::string() : nm[0]},
+                                                {"typeDefinition", td.empty() ? std::string() : td[0]},
+                                                {"blocks", countOccur(cf, "<audioBlockFormat")},
+                                                {"speakerLabel", spk},
+                                                {"coordinate", coord}});
+                    ++emitted;
+                }
+                pos = end + 21;
+            }
+        }
         const int nObj = countOccur(axml, "<audioObject ");
         const int nPack = countOccur(axml, "<audioPackFormat ");
         const int nChan = countOccur(axml, "<audioChannelFormat ");
@@ -729,9 +833,9 @@ inline ParseResult parseAdmImage(const std::string& s) {
                        {"hasObjectDivergence", nDivergence > 0}, {"divergenceBlocks", nDivergence},
                        {"hasImportance", hasImportance}, {"objectImportance", importanceVals},
                        {"objectNames", names},
+                       {"channels", channelsJson},
                        {"programme", prog.empty() ? std::string() : prog[0]},
-                       {"version", extractAttr(axml, "version").empty()
-                                       ? std::string() : extractAttr(axml, "version")[0]}};
+                       {"version", afeVersion}};
     }
 
     Json warnings = Json::array();
@@ -751,7 +855,8 @@ inline ParseResult parseAdmImage(const std::string& s) {
         {"format", Json{{"channels", fmtChannels}, {"sampleRate", (double)fmtRate},
                         {"bitDepth", fmtBits}, {"frames", (double)frames},
                         {"durationSec", fmtRate ? (double)frames / (double)fmtRate : 0.0}}},
-        {"chunks", chunks}, {"chna", chnaJson}, {"adm", admJson}, {"warnings", warnings}};
+        {"chunks", chunks}, {"chna", chnaJson}, {"packTypes", packTypesJson},
+        {"adm", admJson}, {"warnings", warnings}};
     r.axml = axml;  // expose the raw ADM XML for profile conformance scanning.
     r.ok = true;
     return r;

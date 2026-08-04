@@ -130,6 +130,14 @@ target_include_directories(reaper_mcp_damf_test PRIVATE
 target_link_libraries(reaper_mcp_damf_test PRIVATE Threads::Threads)
 add_test(NAME unit.damf COMMAND reaper_mcp_damf_test)
 
+# --- Unit: BS.1770-4 bed channel-weight table (bed_weights.h; header-only, no REAPER) ---
+# Pure SDK-free logic: the F33-conformant weight vectors (1.41 only at ear level within |az| 60-120
+# inclusive; rears 1.0, heights 1.0, LFE 0; 22.2 documented-unweighted), the SMPTE label/LFE pins,
+# and the quantitative power-domain delta (a wrong 1.41 cell == 10*log10(1.41) dB, via gatedLoudness).
+add_executable(reaper_mcp_bed_weights_test unit/test_bed_weights.cpp)
+target_include_directories(reaper_mcp_bed_weights_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME unit.bed_weights COMMAND reaper_mcp_bed_weights_test)
+
 # --- Unit: Batch L1 object send-layout orchestration core (send_layout.h; header-only, no REAPER) ---
 # Pure SDK-free logic: the bed-first renderer input roster, the send I_SRCCHAN/I_DSTCHAN encode/decode
 # round-trip, the Dolby master constraint validator, the idempotent reconciliation diff, and the

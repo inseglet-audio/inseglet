@@ -34,6 +34,8 @@
 //         spatial.mirror_scene, spatial.beamform, spatial.set_distance
 //   Native object-audio authoring (ITU-R BS.2076 ADM BWF):
 //         spatial.author_object_bed, spatial.export_adm
+//   IAMF delivery bridge (emit an iamf-loom manifest + Loom-order WAVs):
+//         spatial.export_loom_manifest
 //   (head_track_bridge.h is the SDK-free OSC parser + apply.)
 //
 // Channel-encoding facts are taken verbatim from the pinned reaper_plugin_functions.h:
@@ -65,6 +67,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -76,6 +79,7 @@
 #include "../adm_bwf.h"        // native ADM (BS.2076) BWF authoring + parsing
 #include "../adm_profile.h"    // Dolby Atmos Master ADM Profile normalize + validate
 #include "../damf.h"           // native Dolby Atmos Master File (DAMF) triad serializer (spatial.export_damf)
+#include "../loom_manifest.h"  // Inseglet -> iamf-loom bridge: manifest/season emitters + Loom-order WAV writer
 #include "../send_layout.h"    // SDK-free object send-layout roster/encode/reconcile/inspect (Batch L1)
 #include "../tool_registry.h"
 #include "../spatial_verbs.h"  // SDK-free planning core (target/placement/plan) + composite_support
@@ -3835,6 +3839,482 @@ void registerSpatialTools(ToolRegistry& reg) {
                         {"channels", bedCh + (int)objTracks.size()},
                         {"objectMetadataCount", objectMetadataCount}, {"objects", objReport},
                         {"warnings", Json::array()},
+                        {"note", "host build: representative plan (no REAPER render)"}};
+#endif
+        }});
+
+    // ---- spatial.export_loom_manifest — the Inseglet -> iamf-loom bridge ------------
+    reg.add(Tool{
+        "spatial.export_loom_manifest",
+        "Export the session's immersive program as an iamf-loom package source: render the bed and/or "
+        "ambisonic scene (plus optional per-language VO stems) to 48 kHz integer-PCM WAVs in Loom's "
+        "channel order and emit the `loom: 0` YAML manifest beside them — one tool call, then `loom "
+        "compile manifest.yaml` (the response echoes the exact next command). iamf-loom is the open "
+        "manifest-driven IAMF packager (github.com/jlivingston-Cipher/iamf-loom): manifest + WAVs in, "
+        "measured-loudness IAMF/MP4/binaural-preview deliverables out, each gated by the iamf-sentinel "
+        "validator. v1 scope = Loom's Phase-1 source set: beds stereo/5.1/7.1.4 (bedTrack at bedLayout; "
+        "channel order is IDENTICAL to Inseglet's film order — verified with per-channel identity tones; "
+        "only label SPELLINGS differ: Lsr/Rsr==Lrs/Rrs, Ltr/Rtr==Ltb/Rtb) and ambisonic scenes of order "
+        "1-4 (sceneTrack; ACN/SN3D, the native scene convention; REAPER's even-channel padding is "
+        "dropped at write; pass sceneOrder to truncate a higher-order scene). OBJECTS ARE OUT of v1 — "
+        "Loom's `kind: adm` object ingest (M-309) is reserved; this tool FAILS CLOSED on objectTracks "
+        "(author object masters with spatial.export_adm today) rather than folding objects silently. "
+        "targets[] maps to Loom targets: iamf (raw .iamf; preset archive = lossless flac mezzanine), "
+        "mp4 (A/V mux; video: required for preset youtube), preview (binaural review copy — the "
+        "presentation is declared `headphones: binaural` automatically, Loom's M-402 rule). voTracks[] "
+        "rows (track+lang+label) become a `languages:` block: one presentation per language, per-mix "
+        "measured loudness. episodes[] additionally emits a season.yaml batch spec with {episode}-"
+        "templated outputs for `loom batch`. NEVER EMITS A LOUDNESS VALUE — Loom measures loudness "
+        "(that is the point of it); policy.loudness.normalize appears only when you pass normalize. "
+        "The manifest is schema-shaped for `loom: 0`; `loom compile` is the authority (this tool "
+        "refuses only the combinations Loom is known to reject: youtube without video / M-404, archive "
+        "off-iamf or non-flac / M-402, normalize with lpcm / M-402, non-48k renders / M-308). Stems "
+        "render bit-exact (RENDER_* snapshot/restore, temps deleted); bound long programmes with "
+        "boundsFlag=0 + startPos/endPos (a render blocks the main thread). dryRun (DEFAULT false) "
+        "plans sources + targets and returns the manifest YAML WITHOUT rendering or writing.",
+        jparse(R"({"type":"object","properties":{
+            "bedTrack":{"type":"integer","minimum":0},
+            "bedLayout":{"type":"string","enum":["stereo","5.1","7.1.4"],"default":"7.1.4"},
+            "sceneTrack":{"type":"integer","minimum":0},
+            "sceneOrder":{"type":"integer","minimum":1,"maximum":4},
+            "voTracks":{"type":"array","items":{"type":"object","properties":{
+                "track":{"type":"integer","minimum":0},
+                "lang":{"type":"string"},
+                "label":{"type":"string"}},
+                "required":["track","lang"],"additionalProperties":false}},
+            "objectTracks":{"type":"array","items":{"type":"integer","minimum":0}},
+            "targets":{"type":"array","items":{"type":"object","properties":{
+                "format":{"type":"string","enum":["iamf","mp4","preview"]},
+                "out":{"type":"string"},
+                "video":{"type":"string"},
+                "preset":{"type":"string","enum":["youtube","archive"]}},
+                "required":["format"],"additionalProperties":false}},
+            "codec":{"type":"string","enum":["opus","flac","lpcm"]},
+            "normalize":{"type":"number"},
+            "title":{"type":"string"},
+            "outDir":{"type":"string"},
+            "episodes":{"type":"array","items":{"type":"string"}},
+            "bitDepth":{"type":"integer","enum":[16,24],"default":24},
+            "boundsFlag":{"type":"integer","minimum":0,"maximum":7,"default":1},
+            "startPos":{"type":"number"},"endPos":{"type":"number"},
+            "renderAction":{"type":"integer","default":41824},
+            "dryRun":{"type":"boolean","default":false}},
+            "additionalProperties":false})"),
+        jparse(R"({"type":"object","properties":{
+            "ok":{"type":"boolean"},"dryRun":{"type":"boolean"},"path":{"type":"string"},
+            "seasonPath":{"type":"string"},"outDir":{"type":"string"},"title":{"type":"string"},
+            "manifestYaml":{"type":"string"},"sources":{"type":"array"},"targets":{"type":"array"},
+            "wavs":{"type":"array"},"channels":{"type":"integer"},"sampleRate":{"type":"number"},
+            "frames":{"type":"integer"},"bitDepth":{"type":"integer"},"durationSec":{"type":"number"},
+            "next":{"type":"string"},
+            "warnings":{"type":"array","items":{"type":"string"}},"note":{"type":"string"},
+            "error":{"type":"string"},"detail":{"type":"string"},"remediation":{"type":"string"}}})"),
+        ToolAnnotations{/*readOnly*/ false, /*destructive*/ false, /*idempotent*/ false},
+        Profile::Render,
+        [](const Json& a) -> Json {
+            namespace lb = loomb;
+            const bool dryRun = optBool(a, "dryRun", false);
+            const std::string bedLayout = optStr(a, "bedLayout", "7.1.4");
+            int bitDepth = optInt(a, "bitDepth", 24);
+            if (bitDepth != 16 && bitDepth != 24) bitDepth = 24;
+            const int boundsFlag = optInt(a, "boundsFlag", 1);
+            const bool haveBedArg = a.contains("bedTrack") && a["bedTrack"].is_number();
+            const bool haveSceneArg = a.contains("sceneTrack") && a["sceneTrack"].is_number();
+            const bool haveNormalize = a.contains("normalize") && a["normalize"].is_number();
+            std::string codec = optStr(a, "codec", "");
+
+            // ---- SDK-independent validation (identical on both build paths) ----
+            std::vector<int> objTracks;
+            if (a.contains("objectTracks") && a["objectTracks"].is_array())
+                for (const auto& o : a["objectTracks"]) if (o.is_number()) objTracks.push_back(o.get<int>());
+            if (!objTracks.empty())
+                return makeError("objects_not_in_loom_v1",
+                                 "objects are out of the Loom bridge's v1 — Loom's object route is ADM "
+                                 "ingest (`kind: adm`, M-309, reserved), and folding objects into a bed "
+                                 "silently is exactly the failure class this pipeline exists to prevent",
+                                 "author the object master with spatial.export_adm (ADM BWF) today; "
+                                 "beds and ambisonic scenes export to Loom directly");
+            const lb::LoomBed* bedDef = lb::findLoomBed(bedLayout);
+            if (!bedDef)
+                return makeError("unknown_layout", "bed layout '" + bedLayout +
+                                     "' is outside Loom's Phase-1 bed set",
+                                 "Loom accepts stereo, 5.1, 7.1.4 (M-305 class); 7.1.2/9.1.6/22.2 "
+                                 "content routes via spatial.export_adm until Loom's ADM ingest lands");
+            if (!haveBedArg && !haveSceneArg)
+                return makeError("no_sources", "give a bedTrack and/or sceneTrack to export",
+                                 "e.g. {\"bedTrack\":3} or {\"sceneTrack\":5,\"sceneOrder\":3}");
+            if (a.contains("sceneOrder") && a["sceneOrder"].is_number() &&
+                (a["sceneOrder"].get<int>() < 1 || a["sceneOrder"].get<int>() > lb::loomMaxAmbiOrder()))
+                return makeError("order_beyond_loom", "sceneOrder must be 1..4",
+                                 "Loom's Phase-1 ambisonics cap is 4th order (25 ch, ACN/SN3D)");
+
+            Json warnings = Json::array();
+            std::vector<lb::BridgeTarget> targets;
+            if (a.contains("targets") && a["targets"].is_array() && !a["targets"].empty()) {
+                for (const auto& t : a["targets"]) {
+                    if (!t.is_object() || !t.contains("format") || !t["format"].is_string()) continue;
+                    lb::BridgeTarget bt;
+                    bt.format = t["format"].get<std::string>();
+                    bt.out = t.contains("out") && t["out"].is_string() ? t["out"].get<std::string>() : "";
+                    bt.video = t.contains("video") && t["video"].is_string() ? t["video"].get<std::string>() : "";
+                    bt.preset = t.contains("preset") && t["preset"].is_string() ? t["preset"].get<std::string>() : "";
+                    targets.push_back(std::move(bt));
+                }
+            }
+            if (targets.empty()) targets.push_back(lb::BridgeTarget{"iamf", "", "", ""});
+            std::vector<std::string> episodes;
+            if (a.contains("episodes") && a["episodes"].is_array())
+                for (const auto& e : a["episodes"])
+                    if (e.is_string()) episodes.push_back(lb::slugIdent(e.get<std::string>(), "ep"));
+            bool anyPreview = false;
+            for (auto& t : targets) {
+                if (t.format == "preview") anyPreview = true;
+                if (t.preset == "youtube") {
+                    if (t.format != "mp4")
+                        return makeError("preset_target_mismatch",
+                                         "preset youtube applies to mp4 targets only (Loom M-402)",
+                                         "use {\"format\":\"mp4\",\"video\":...,\"preset\":\"youtube\"}");
+                    if (t.video.empty())
+                        return makeError("youtube_needs_video",
+                                         "preset youtube is the validated A/V ingest MP4 — Loom "
+                                         "refuses it without a video donor (M-404)",
+                                         "pass video: an H.264 MP4 to stream-copy");
+                }
+                if (t.preset == "archive") {
+                    if (t.format != "iamf")
+                        return makeError("preset_target_mismatch",
+                                         "preset archive is the lossless raw-.iamf mezzanine shape; "
+                                         "it applies to iamf targets only (Loom M-402)", "");
+                    if (codec.empty()) {
+                        codec = "flac";
+                        warnings.push_back("preset archive is lossless: policy.codec.name set to flac "
+                                           "(pass codec explicitly to override — Loom will then "
+                                           "adjudicate it, M-402).");
+                    } else if (codec != "flac") {
+                        return makeError("archive_needs_flac",
+                                         "preset archive is lossless; Loom refuses it with codec '" +
+                                             codec + "' (M-402 — presets never silently override policy)",
+                                         "drop codec or set codec: flac");
+                    }
+                }
+            }
+            if (haveNormalize && codec == "lpcm")
+                return makeError("normalize_with_lpcm",
+                                 "normalize with codec lpcm breaks bit-transparency — Loom refuses "
+                                 "the combination (M-402)", "drop normalize or use opus/flac");
+
+            // Default output names (slug of the title fills in below); {episode} templating when batching.
+            auto defaultOut = [&](const std::string& fmt, const std::string& slug) -> std::string {
+                const std::string base = episodes.empty() ? slug : std::string("{episode}");
+                if (fmt == "iamf") return "dist/" + base + ".iamf";
+                if (fmt == "mp4") return "dist/" + base + ".mp4";
+                return "dist/" + base + "_preview.wav";
+            };
+
+#ifdef REAPER_MCP_HAVE_SDK
+            // ---- resolve tracks + names ----
+            MediaTrack* bt = nullptr;
+            MediaTrack* st = nullptr;
+            int bedCh = 0, sceneOrder = 0, acnCount = 0;
+            if (haveBedArg) {
+                bt = GetTrack(kCur, a["bedTrack"].get<int>());
+                if (!bt) return makeError("bad_bed_track",
+                                          "bedTrack out of range: " + std::to_string(a["bedTrack"].get<int>()), "");
+                bedCh = bedDef->channels;
+                const int actual = trackChannels(bt);
+                if (actual < bedCh)
+                    warnings.push_back("bedTrack has " + std::to_string(actual) + " channels but " +
+                                       bedLayout + " needs " + std::to_string(bedCh) +
+                                       " — the missing bed channels render silent.");
+            }
+            if (haveSceneArg) {
+                st = GetTrack(kCur, a["sceneTrack"].get<int>());
+                if (!st) return makeError("bad_scene_track",
+                                          "sceneTrack out of range: " + std::to_string(a["sceneTrack"].get<int>()), "");
+                const int nch = trackChannels(st);
+                if (a.contains("sceneOrder") && a["sceneOrder"].is_number()) {
+                    sceneOrder = a["sceneOrder"].get<int>();
+                } else {
+                    for (int o = 1; o <= 7; ++o)
+                        if ((o + 1) * (o + 1) <= nch) sceneOrder = o;
+                    if (sceneOrder > lb::loomMaxAmbiOrder())
+                        return makeError("order_beyond_loom",
+                                         "the scene bus is " + std::to_string(nch) + " ch (order " +
+                                             std::to_string(sceneOrder) + "); Loom's cap is 4th order",
+                                         "pass sceneOrder (1..4) to truncate the scene explicitly — "
+                                         "no silent truncation");
+                    if (sceneOrder < 1)
+                        return makeError("not_a_scene_bus",
+                                         "sceneTrack has " + std::to_string(nch) +
+                                             " channels — no full ACN set fits (order 1 needs 4)",
+                                         "point sceneTrack at the HOA scene bus");
+                }
+                acnCount = (sceneOrder + 1) * (sceneOrder + 1);
+                if (nch < acnCount)
+                    warnings.push_back("sceneTrack has " + std::to_string(nch) + " channels but order " +
+                                       std::to_string(sceneOrder) + " needs " + std::to_string(acnCount) +
+                                       " — the missing ACN channels render silent.");
+            }
+
+            // Title: explicit > bed/scene track name (S-208 trap: warn on default-shaped names).
+            std::string title = optStr(a, "title", "");
+            if (title.empty()) {
+                if (bt) title = trackNameStr(bt);
+                if (title.empty() && st) title = trackNameStr(st);
+                if (lb::defaultShapedName(title)) {
+                    warnings.push_back("title '" + title + "' is a default-shaped track name (the "
+                                       "S-208 template trap) — it ships into deliverable metadata; "
+                                       "pass title: for a real one.");
+                    if (title.empty()) title = "REAPER MCP Loom Export";
+                }
+            }
+            const std::string slug = lb::slugIdent(title, "program");
+
+            // VO rows.
+            std::vector<lb::BridgeLanguage> languages;
+            std::vector<int> voTrackIdx;
+            if (a.contains("voTracks") && a["voTracks"].is_array()) {
+                for (const auto& v : a["voTracks"]) {
+                    if (!v.is_object() || !v.contains("track") || !v["track"].is_number() ||
+                        !v.contains("lang") || !v["lang"].is_string())
+                        continue;
+                    MediaTrack* vt = GetTrack(kCur, v["track"].get<int>());
+                    if (!vt) return makeError("bad_vo_track",
+                                              "voTracks track out of range: " +
+                                                  std::to_string(v["track"].get<int>()), "");
+                    lb::BridgeLanguage L;
+                    L.lang = lb::slugIdent(toLower(v["lang"].get<std::string>()), "lang");
+                    L.vo = "vo_" + L.lang;
+                    L.label = v.contains("label") && v["label"].is_string()
+                                  ? v["label"].get<std::string>() : trackNameStr(vt);
+                    if (lb::defaultShapedName(L.label))
+                        warnings.push_back("language '" + L.lang + "' label '" + L.label +
+                                           "' is default-shaped (S-208 trap) — pass label: for a real one.");
+                    for (const auto& seen : languages)
+                        if (seen.lang == L.lang)
+                            return makeError("duplicate_lang", "duplicate language tag: " + L.lang, "");
+                    languages.push_back(std::move(L));
+                    voTrackIdx.push_back(v["track"].get<int>());
+                }
+            }
+
+            // ---- assemble the manifest model ----
+            lb::BridgeModel model;
+            model.title = title;
+            model.codec = codec;
+            model.haveNormalize = haveNormalize;
+            if (haveNormalize) model.normalize = a["normalize"].get<double>();
+            model.binaural = anyPreview;  // Loom M-402: a binaural preview needs the declaration
+            if (anyPreview)
+                warnings.push_back("preview target: presentation elements declared "
+                                   "`headphones: binaural` (Loom M-402 — without it the review copy "
+                                   "would be the plain stereo downmix).");
+            if (bt) model.sources.push_back({"main", "wavs/main.wav", "bed", bedLayout});
+            if (st) model.sources.push_back({"scene", "wavs/scene.wav", "ambisonics", ""});
+            for (const auto& L : languages)
+                model.sources.push_back({L.vo, "wavs/" + L.vo + ".wav", "bed", "stereo"});
+            model.languages = languages;
+            for (auto& t : targets) {
+                if (t.out.empty()) t.out = defaultOut(t.format, slug);
+                if (!episodes.empty() && t.out.find("{episode}") == std::string::npos)
+                    warnings.push_back("episodes[] given but target out '" + t.out +
+                                       "' carries no {episode} — batch jobs would collide on it "
+                                       "(Loom aborts at compile, M-421).");
+            }
+            model.targets = targets;
+            const std::string manifestYaml = lb::writeManifestYaml(model);
+
+            std::string outDir = optStr(a, "outDir", "");
+            if (outDir.empty()) {
+                char pbuf[4096] = {0};
+                GetProjectPath(pbuf, (int)sizeof(pbuf));
+                std::string dir = pbuf[0] ? std::string(pbuf)
+                                          : (GetResourcePath() ? std::string(GetResourcePath()) : std::string("."));
+                outDir = dir + "/loom_export";
+            }
+            const std::string manifestPath = outDir + "/manifest.yaml";
+            const std::string seasonPath = episodes.empty() ? std::string() : outDir + "/season.yaml";
+            const std::string next = episodes.empty()
+                ? "loom compile " + manifestPath
+                : "loom batch " + seasonPath;
+
+            Json sourcesJ = Json::array();
+            for (const auto& s : model.sources) {
+                Json e = Json{{"name", s.name}, {"path", s.path}, {"kind", s.kind}};
+                if (s.kind == "bed") e["layout"] = s.layout;
+                if (s.name == "scene") e["order"] = sceneOrder;
+                sourcesJ.push_back(std::move(e));
+            }
+            Json targetsJ = Json::array();
+            for (const auto& t : model.targets) {
+                Json e = Json{{"format", t.format}, {"out", t.out}};
+                if (!t.video.empty()) e["video"] = t.video;
+                if (!t.preset.empty()) e["preset"] = t.preset;
+                targetsJ.push_back(std::move(e));
+            }
+
+            if (dryRun) {
+                return Json{{"dryRun", true}, {"ok", true}, {"path", manifestPath},
+                            {"seasonPath", seasonPath.empty() ? Json(nullptr) : Json(seasonPath)},
+                            {"outDir", outDir}, {"title", title}, {"manifestYaml", manifestYaml},
+                            {"sources", sourcesJ}, {"targets", targetsJ}, {"bitDepth", bitDepth},
+                            {"next", next}, {"warnings", warnings},
+                            {"note", "dryRun: planned sources + targets and composed the manifest; "
+                                     "no render, no files written."}};
+            }
+
+            // ---- render + write ----
+            size_t frames = 0;
+            double sampleRate = 0.0;
+            struct StemOut { std::string name; std::vector<std::vector<float>> ch; };
+            std::vector<StemOut> stems;
+            auto takeChannels = [&](const meter::AudioBuffer& b, int want, std::vector<std::vector<float>>& out) {
+                out.assign((size_t)want, std::vector<float>());
+                for (int c = 0; c < want; ++c) {
+                    out[(size_t)c].assign(b.frames, 0.0f);
+                    if (c < b.channels)
+                        for (size_t f = 0; f < b.frames; ++f) out[(size_t)c][f] = b.at(f, c);
+                }
+            };
+            auto renderOne = [&](MediaTrack* tr, int trackIdx, int wantCh, const char* what,
+                                 StemOut& dst) -> Json {
+                (void)tr;
+                TempRender r = renderTargetToTempWav(trackIdx, wantCh, /*measureLoudness*/ false,
+                                                     boundsFlag, a);
+                if (!r.ok)
+                    return makeError(r.error.empty() ? "render_failed" : r.error,
+                                     std::string("failed to render the ") + what, r.remediation);
+                if (sampleRate <= 0) sampleRate = r.buf.sampleRate;
+                if (frames == 0) frames = r.buf.frames;
+                else if (r.buf.frames != frames)
+                    warnings.push_back(std::string(what) + " rendered " + std::to_string(r.buf.frames) +
+                                       " frames vs " + std::to_string(frames) +
+                                       " for the first source — Loom enforces uniform frame counts "
+                                       "at compile (M-415).");
+                takeChannels(r.buf, wantCh, dst.ch);
+                return Json(nullptr);
+            };
+            if (bt) {
+                StemOut s{"main", {}};
+                Json err = renderOne(bt, a["bedTrack"].get<int>(), bedCh, "bed track", s);
+                if (!err.is_null()) return err;
+                stems.push_back(std::move(s));
+            }
+            if (st) {
+                StemOut s{"scene", {}};
+                Json err = renderOne(st, a["sceneTrack"].get<int>(), clampChannels(acnCount),
+                                     "scene bus", s);
+                if (!err.is_null()) return err;
+                s.ch.resize((size_t)acnCount);  // drop REAPER's even-channel padding: ACN set only
+                stems.push_back(std::move(s));
+            }
+            for (size_t vi = 0; vi < voTrackIdx.size(); ++vi) {
+                StemOut s{languages[vi].vo, {}};
+                Json err = renderOne(nullptr, voTrackIdx[vi], 2, "VO track", s);
+                if (!err.is_null()) return err;
+                stems.push_back(std::move(s));
+            }
+            if (frames == 0 || stems.empty())
+                return makeError("render_empty", "the render produced no audio",
+                                 "bound the export to audio (boundsFlag=0 + startPos/endPos) and "
+                                 "check the source tracks route audio");
+            if (sampleRate <= 0) sampleRate = 48000.0;
+            if ((int)std::llround(sampleRate) != 48000)
+                return makeError("sample_rate_not_48k",
+                                 "the render produced " + std::to_string((int)std::llround(sampleRate)) +
+                                     " Hz; Loom's source gate requires 48000 Hz integer PCM (M-308)",
+                                 "set the project sample rate to 48000 and retry");
+
+            std::error_code ec;
+            std::filesystem::create_directories(std::filesystem::path(outDir) / "wavs", ec);
+            if (ec)
+                return makeError("dir_create_failed", "could not create " + outDir + "/wavs: " +
+                                     ec.message(),
+                                 "pass a writable outDir (or omit it to use the project directory)");
+            Json wavsJ = Json::array();
+            for (const auto& s : stems) {
+                const std::string wavBytes =
+                    lb::writeWavPcm(s.ch, frames, (int)std::llround(sampleRate), bitDepth);
+                const std::string wavPath = outDir + "/wavs/" + s.name + ".wav";
+                std::ofstream os(wavPath, std::ios::binary | std::ios::trunc);
+                if (!os) return makeError("file_open_failed",
+                                          "could not open output path for writing: " + wavPath, "");
+                os.write(wavBytes.data(), (std::streamsize)wavBytes.size());
+                os.close();
+                if (!os) return makeError("file_write_failed", "error writing " + wavPath, "");
+                wavsJ.push_back(Json{{"source", s.name}, {"path", wavPath},
+                                     {"channels", (int)s.ch.size()}});
+            }
+            {
+                std::ofstream os(manifestPath, std::ios::binary | std::ios::trunc);
+                if (!os) return makeError("file_open_failed",
+                                          "could not open output path for writing: " + manifestPath, "");
+                os.write(manifestYaml.data(), (std::streamsize)manifestYaml.size());
+                os.close();
+                if (!os) return makeError("file_write_failed", "error writing " + manifestPath, "");
+            }
+            if (!episodes.empty()) {
+                const std::string seasonYaml = lb::writeSeasonYaml("manifest.yaml", episodes);
+                std::ofstream os(seasonPath, std::ios::binary | std::ios::trunc);
+                if (!os) return makeError("file_open_failed",
+                                          "could not open output path for writing: " + seasonPath, "");
+                os.write(seasonYaml.data(), (std::streamsize)seasonYaml.size());
+                os.close();
+                if (!os) return makeError("file_write_failed", "error writing " + seasonPath, "");
+            }
+
+            int totalCh = 0;
+            for (const auto& s : stems) totalCh += (int)s.ch.size();
+            return Json{{"ok", true}, {"dryRun", false}, {"path", manifestPath},
+                        {"seasonPath", seasonPath.empty() ? Json(nullptr) : Json(seasonPath)},
+                        {"outDir", outDir}, {"title", title}, {"manifestYaml", manifestYaml},
+                        {"sources", sourcesJ}, {"targets", targetsJ}, {"wavs", wavsJ},
+                        {"channels", totalCh}, {"sampleRate", sampleRate},
+                        {"frames", (double)frames}, {"bitDepth", bitDepth},
+                        {"durationSec", (double)frames / sampleRate}, {"next", next},
+                        {"warnings", warnings}};
+#else
+            (void)boundsFlag;
+            // Host build: representative plan over the same SDK-free emitter (no REAPER render).
+            std::string title = optStr(a, "title", "Program");
+            const std::string slug = lb::slugIdent(title, "program");
+            lb::BridgeModel model;
+            model.title = title;
+            model.codec = codec;
+            model.haveNormalize = haveNormalize;
+            if (haveNormalize) model.normalize = a["normalize"].get<double>();
+            model.binaural = anyPreview;
+            if (haveBedArg) model.sources.push_back({"main", "wavs/main.wav", "bed", bedLayout});
+            if (haveSceneArg) model.sources.push_back({"scene", "wavs/scene.wav", "ambisonics", ""});
+            if (a.contains("voTracks") && a["voTracks"].is_array()) {
+                for (const auto& v : a["voTracks"]) {
+                    if (!v.is_object() || !v.contains("lang") || !v["lang"].is_string()) continue;
+                    lb::BridgeLanguage L;
+                    L.lang = lb::slugIdent(toLower(v["lang"].get<std::string>()), "lang");
+                    L.vo = "vo_" + L.lang;
+                    L.label = v.contains("label") && v["label"].is_string()
+                                  ? v["label"].get<std::string>() : L.lang;
+                    model.sources.push_back({L.vo, "wavs/" + L.vo + ".wav", "bed", "stereo"});
+                    model.languages.push_back(std::move(L));
+                }
+            }
+            for (auto& t : targets)
+                if (t.out.empty()) t.out = defaultOut(t.format, slug);
+            model.targets = targets;
+            Json sourcesJ = Json::array();
+            for (const auto& s : model.sources)
+                sourcesJ.push_back(Json{{"name", s.name}, {"path", s.path}, {"kind", s.kind}});
+            Json targetsJ = Json::array();
+            for (const auto& t : model.targets)
+                targetsJ.push_back(Json{{"format", t.format}, {"out", t.out}});
+            const std::string outDir = optStr(a, "outDir", "loom_export");
+            const std::string manifestPath = outDir + "/manifest.yaml";
+            return Json{{"dryRun", dryRun}, {"ok", true}, {"path", manifestPath},
+                        {"seasonPath", episodes.empty() ? Json(nullptr) : Json(outDir + "/season.yaml")},
+                        {"outDir", outDir}, {"title", title},
+                        {"manifestYaml", lb::writeManifestYaml(model)},
+                        {"sources", sourcesJ}, {"targets", targetsJ}, {"bitDepth", bitDepth},
+                        {"next", "loom compile " + manifestPath}, {"warnings", warnings},
                         {"note", "host build: representative plan (no REAPER render)"}};
 #endif
         }});

@@ -18,6 +18,21 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.6.0" author="James Livingston" time="2026-08-04T00:00:00Z">
+        <changelog><![CDATA[IAMF delivery: the Loom bridge + cross-ecosystem docs
+(187 tools / 3 resources / 4 prompts; includes the 1.5.1 correctness patch).
+spatial.export_loom_manifest: one call renders the session's bed (stereo/5.1/7.1.4) and/or
+ambisonic scene (order 1-4, ACN/SN3D) plus per-language VO stems as 48 kHz integer-PCM WAVs
+in iamf-loom's channel order and emits the loom: 0 manifest (+ optional season.yaml);
+`loom compile` accepts the output as-is and every packaged deliverable is gated by the
+iamf-sentinel validator. Channel mapping is identity (spelling-only label deltas), verified
+with per-channel identity tones. Never writes a loudness value (Loom measures); objects fail
+closed to the ADM route (spatial.export_adm).
+New deliver_to_iamf expert prompt (4th) walks inventory -> per-mix channel-budget check (the
+M-416 class) -> dryRun preview -> export -> loom compile/run. New MANUAL section 9
+"Delivering to IAMF" documents the pipeline end to end.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.6.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.5.1" author="James Livingston" time="2026-08-04T00:00:00Z">
         <changelog><![CDATA[Correctness-first patch release; no surface change (186 tools).
 BS.1770-4 bed channel weights now read Tables 4/5 exactly (boundary-inclusive: 1.41 only at

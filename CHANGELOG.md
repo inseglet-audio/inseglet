@@ -6,6 +6,30 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-08-04
+
+Feature release: IAMF delivery. Surface **186 → 187 tools**; expert prompts **3 → 4**.
+
+### Added
+- **`spatial.export_loom_manifest`** (Render) — a one-call bridge to the open
+  [iamf-loom](https://github.com/jlivingston-Cipher/iamf-loom) packager: renders the
+  session's bed (stereo/5.1/7.1.4) and/or ambisonic scene (order 1–4, ACN/SN3D) plus
+  per-language VO stems as 48 kHz integer-PCM WAVs in Loom's channel order, and emits the
+  `loom: 0` manifest (+ optional season.yaml) beside them — `loom compile` accepts the
+  output as-is, and the response echoes the exact next command. The channel mapping is
+  identity (label spellings only: Lsr/Rsr==Lrs/Rrs, Ltr/Rtr==Ltb/Rtb), verified with
+  per-channel identity tones. Never emits a loudness value (Loom measures — that is the
+  point of it); objects fail closed toward the ADM route (`spatial.export_adm`);
+  known-invalid target combinations fail closed (youtube-without-video, archive/normalize
+  constraints, non-48k renders).
+- **`deliver_to_iamf` expert prompt** (prompts 3 → 4) — inventory → per-mix
+  channel-budget check (a 7.1.4 bed + an order-3 scene + a stereo VO = 30 channels exceeds
+  IAMF base_enhanced's 28-per-mix cap; order 2 fits at 23) → dryRun preview → export →
+  `loom compile` / `loom run` with the iamf-sentinel gate.
+- **MANUAL §9 “Delivering to IAMF”** — the pipeline end to end, the channel-budget
+  note, and the validate/repair loop; REFERENCE.md regenerated (187 tools / 3 resources /
+  4 prompts).
+
 ## [1.5.1] — 2026-08-04
 
 Correctness-first patch release; no surface change (186 tools).

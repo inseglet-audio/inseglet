@@ -1,9 +1,9 @@
 # REAPER MCP — Tool, Resource & Prompt Reference
 
-> **Generated** 2026-07-10 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
+> **Generated** 2026-08-04 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
 
 
-**Protocol:** MCP `2025-06-18` · **Surface:** 186 tools · 3 resources · 3 prompts.
+**Protocol:** MCP `2025-06-18` · **Surface:** 187 tools · 3 resources · 4 prompts.
 
 
 Tools are grouped by capability **profile**. Clients may negotiate a bounded profile set at `initialize` (to stay under LLM tool-count caps); `Profile::Full` (the default) exposes every tool. The always-on `tools.enumerate` meta-tool is visible under any profile.
@@ -17,10 +17,10 @@ Tools are grouped by capability **profile**. Clients may negotiate a bounded pro
 | **Mixing** (`mixing`) | 27 | Track FX, parameter automation envelopes, faders, and immersive-aware style chains. |
 | **Routing** (`routing`) | 8 | Track-to-track sends and channel-count management. |
 | **MIDI** (`midi`) | 23 | Takes and MIDI note / CC CRUD. |
-| **Render** (`render`) | 4 | Multichannel / immersive deliverable rendering. |
+| **Render** (`render`) | 5 | Multichannel / immersive deliverable rendering. |
 | **Analysis** (`analysis`) | 18 | Deliverable-spec conformance (loudness + true-peak, per-bed). |
 | **Composite / DSL** (`full`) | 1 | The deterministic composite macro-DSL runner (`$ref`/capture, atomic single-undo). |
-| **Total** | **186** | |
+| **Total** | **187** | |
 
 ## Contents
 
@@ -13386,6 +13386,262 @@ Returns a structured object with: `basePath`, `bedChannels`, `bedLayout`, `bitDe
 ```
 </details>
 
+#### `spatial.export_loom_manifest`
+
+**Profile:** `render` · **Hints:** mutating
+
+Export the session's immersive program as an iamf-loom package source: render the bed and/or ambisonic scene (plus optional per-language VO stems) to 48 kHz integer-PCM WAVs in Loom's channel order and emit the `loom: 0` YAML manifest beside them — one tool call, then `loom compile manifest.yaml` (the response echoes the exact next command). iamf-loom is the open manifest-driven IAMF packager (github.com/jlivingston-Cipher/iamf-loom): manifest + WAVs in, measured-loudness IAMF/MP4/binaural-preview deliverables out, each gated by the iamf-sentinel validator. v1 scope = Loom's Phase-1 source set: beds stereo/5.1/7.1.4 (bedTrack at bedLayout; channel order is IDENTICAL to Inseglet's film order — verified with per-channel identity tones; only label SPELLINGS differ: Lsr/Rsr==Lrs/Rrs, Ltr/Rtr==Ltb/Rtb) and ambisonic scenes of order 1-4 (sceneTrack; ACN/SN3D, the native scene convention; REAPER's even-channel padding is dropped at write; pass sceneOrder to truncate a higher-order scene). OBJECTS ARE OUT of v1 — Loom's `kind: adm` object ingest (M-309) is reserved; this tool FAILS CLOSED on objectTracks (author object masters with spatial.export_adm today) rather than folding objects silently. targets[] maps to Loom targets: iamf (raw .iamf; preset archive = lossless flac mezzanine), mp4 (A/V mux; video: required for preset youtube), preview (binaural review copy — the presentation is declared `headphones: binaural` automatically, Loom's M-402 rule). voTracks[] rows (track+lang+label) become a `languages:` block: one presentation per language, per-mix measured loudness. episodes[] additionally emits a season.yaml batch spec with {episode}-templated outputs for `loom batch`. NEVER EMITS A LOUDNESS VALUE — Loom measures loudness (that is the point of it); policy.loudness.normalize appears only when you pass normalize. The manifest is schema-shaped for `loom: 0`; `loom compile` is the authority (this tool refuses only the combinations Loom is known to reject: youtube without video / M-404, archive off-iamf or non-flac / M-402, normalize with lpcm / M-402, non-48k renders / M-308). Stems render bit-exact (RENDER_* snapshot/restore, temps deleted); bound long programmes with boundsFlag=0 + startPos/endPos (a render blocks the main thread). dryRun (DEFAULT false) plans sources + targets and returns the manifest YAML WITHOUT rendering or writing.
+
+**Parameters**
+
+| Param | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `bedLayout` | enum | no | one of: `stereo`, `5.1`, `7.1.4`; default `"7.1.4"` |
+| `bedTrack` | integer | no | min 0 |
+| `bitDepth` | enum | no | one of: `16`, `24`; default `24` |
+| `boundsFlag` | integer | no | default `1`; range [0, 7] |
+| `codec` | enum | no | one of: `opus`, `flac`, `lpcm` |
+| `dryRun` | boolean | no | default `false` |
+| `endPos` | number | no | — |
+| `episodes` | array&lt;string&gt; | no | — |
+| `normalize` | number | no | — |
+| `objectTracks` | array&lt;integer&gt; | no | — |
+| `outDir` | string | no | — |
+| `renderAction` | integer | no | default `41824` |
+| `sceneOrder` | integer | no | range [1, 4] |
+| `sceneTrack` | integer | no | min 0 |
+| `startPos` | number | no | — |
+| `targets` | array&lt;object&gt; | no | — |
+| `title` | string | no | — |
+| `voTracks` | array&lt;object&gt; | no | — |
+
+_Additional properties: not allowed._
+
+**Returns**
+
+Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `manifestYaml`, `next`, `note`, `ok`, `outDir`, `path`, `remediation`, `sampleRate`, `seasonPath`, `sources`, `targets`, `title`, `warnings`, `wavs`.
+
+<details><summary>Full JSON schema</summary>
+
+```json
+{
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "bedLayout": {
+        "default": "7.1.4",
+        "enum": [
+          "stereo",
+          "5.1",
+          "7.1.4"
+        ],
+        "type": "string"
+      },
+      "bedTrack": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "bitDepth": {
+        "default": 24,
+        "enum": [
+          16,
+          24
+        ],
+        "type": "integer"
+      },
+      "boundsFlag": {
+        "default": 1,
+        "maximum": 7,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "codec": {
+        "enum": [
+          "opus",
+          "flac",
+          "lpcm"
+        ],
+        "type": "string"
+      },
+      "dryRun": {
+        "default": false,
+        "type": "boolean"
+      },
+      "endPos": {
+        "type": "number"
+      },
+      "episodes": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "normalize": {
+        "type": "number"
+      },
+      "objectTracks": {
+        "items": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "outDir": {
+        "type": "string"
+      },
+      "renderAction": {
+        "default": 41824,
+        "type": "integer"
+      },
+      "sceneOrder": {
+        "maximum": 4,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sceneTrack": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "startPos": {
+        "type": "number"
+      },
+      "targets": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "format": {
+              "enum": [
+                "iamf",
+                "mp4",
+                "preview"
+              ],
+              "type": "string"
+            },
+            "out": {
+              "type": "string"
+            },
+            "preset": {
+              "enum": [
+                "youtube",
+                "archive"
+              ],
+              "type": "string"
+            },
+            "video": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "format"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "title": {
+        "type": "string"
+      },
+      "voTracks": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "lang": {
+              "type": "string"
+            },
+            "track": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "track",
+            "lang"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "outputSchema": {
+    "properties": {
+      "bitDepth": {
+        "type": "integer"
+      },
+      "channels": {
+        "type": "integer"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "dryRun": {
+        "type": "boolean"
+      },
+      "durationSec": {
+        "type": "number"
+      },
+      "error": {
+        "type": "string"
+      },
+      "frames": {
+        "type": "integer"
+      },
+      "manifestYaml": {
+        "type": "string"
+      },
+      "next": {
+        "type": "string"
+      },
+      "note": {
+        "type": "string"
+      },
+      "ok": {
+        "type": "boolean"
+      },
+      "outDir": {
+        "type": "string"
+      },
+      "path": {
+        "type": "string"
+      },
+      "remediation": {
+        "type": "string"
+      },
+      "sampleRate": {
+        "type": "number"
+      },
+      "seasonPath": {
+        "type": "string"
+      },
+      "sources": {
+        "type": "array"
+      },
+      "targets": {
+        "type": "array"
+      },
+      "title": {
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "wavs": {
+        "type": "array"
+      }
+    },
+    "type": "object"
+  }
+}
+```
+</details>
+
 #### `spatial.render_deliverables`
 
 **Profile:** `render` · **Hints:** mutating
@@ -16115,6 +16371,17 @@ Read-only, addressable snapshots of REAPER state (`resources/list`, `resources/r
 
 Declarative expert workflows (`prompts/list`, `prompts/get`). Selecting one injects a message that steers the agent to call the semantic verbs in the right order — an expert immersive workflow without knowing the verb names.
 
+### `deliver_to_iamf` — Deliver the session to IAMF (open immersive)
+
+Render bed / ambisonic-scene / VO stems and emit a ready-to-compile iamf-loom manifest via spatial.export_loom_manifest, then validate the packaged output with iamf-sentinel — the open, royalty-free IAMF delivery pipeline (see MANUAL §9, Delivering to IAMF).
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `outDir` | yes | Directory to write the rendered stems + manifest.yaml into |
+| `bed` | no | Bed layout: stereo, 5.1, 7.1.4, or none (default 7.1.4) |
+| `sceneOrder` | no | Ambisonic scene order 1-4, or 0 for no scene (default 0) |
+| `target` | no | Delivery target: iamf, mp4, or preview; presets youtube / archive (default iamf) |
+
 ### `encode_to_ambisonics` — Encode a source to an ambisonic scene
 
 Encode a mono/stereo bus (or spatialize multiple stems) into an order-N ambisonic scene (ACN/SN3D) via spatial.stereo_to_ambisonic / spatial.spatialize_stems.
@@ -16147,4 +16414,4 @@ Scaffold an immersive Dolby Atmos session — a bed, N object tracks, a binaural
 
 ---
 
-_Reference generated 2026-07-10 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._
+_Reference generated 2026-08-04 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._

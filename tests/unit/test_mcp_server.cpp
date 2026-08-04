@@ -1957,20 +1957,24 @@ int main() {
         json lr = rpc(cli, cfg.token, lreq);
         check(lr.contains("result"), "prompts/list has result");
         const json& prompts = lr["result"]["prompts"];
-        check(prompts.is_array() && prompts.size() == 3, "prompts/list returns the 3 expert workflows");
+        check(prompts.is_array() && prompts.size() == 4, "prompts/list returns the 4 expert workflows");
         // std::map -> deterministic alphabetical order.
-        check(prompts[0].value("name", "") == "encode_to_ambisonics", "prompt[0] = encode_to_ambisonics");
-        check(prompts[1].value("name", "") == "master_for_delivery", "prompt[1] = master_for_delivery");
-        check(prompts[2].value("name", "") == "setup_atmos_session", "prompt[2] = setup_atmos_session");
-        bool sawRequired = false, sawTitle = false;
+        check(prompts[0].value("name", "") == "deliver_to_iamf", "prompt[0] = deliver_to_iamf");
+        check(prompts[1].value("name", "") == "encode_to_ambisonics", "prompt[1] = encode_to_ambisonics");
+        check(prompts[2].value("name", "") == "master_for_delivery", "prompt[2] = master_for_delivery");
+        check(prompts[3].value("name", "") == "setup_atmos_session", "prompt[3] = setup_atmos_session");
+        bool sawRequired = false, sawTitle = false, sawOutDir = false;
         for (const auto& p : prompts) {
             check(p.contains("description") && p["arguments"].is_array(), "prompt has description+arguments");
             if (!p.value("title", "").empty()) sawTitle = true;
-            for (const auto& a : p["arguments"])
+            for (const auto& a : p["arguments"]) {
                 if (a.value("name", "") == "sourceBus" && a.value("required", false)) sawRequired = true;
+                if (a.value("name", "") == "outDir" && a.value("required", false)) sawOutDir = true;
+            }
         }
         check(sawTitle, "prompts advertise a human title");
         check(sawRequired, "encode_to_ambisonics.sourceBus is a required argument");
+        check(sawOutDir, "deliver_to_iamf.outDir is a required argument");
 
         // get with argument substitution
         json greq = {{"jsonrpc", "2.0"}, {"id", 161}, {"method", "prompts/get"},
@@ -1993,6 +1997,25 @@ int main() {
         json gdr = rpc(cli, cfg.token, gdef);
         check(gdr["result"]["messages"][0]["content"].value("text", "").find("7.1.4") != std::string::npos,
               "optional argument falls back to its documented default (7.1.4)");
+
+        // deliver_to_iamf: substitution + the workflow's load-bearing content (the bridge verb,
+        // the exact next-step command, and the M-416 per-mix budget warning).
+        json gdi = {{"jsonrpc", "2.0"}, {"id", 165}, {"method", "prompts/get"},
+                    {"params", {{"name", "deliver_to_iamf"},
+                                {"arguments", {{"outDir", "/tmp/iamf-demo"}, {"sceneOrder", "3"}}}}}};
+        json gdir = rpc(cli, cfg.token, gdi);
+        check(gdir.contains("result"), "prompts/get(deliver_to_iamf) has result");
+        const std::string dtext = gdir["result"]["messages"][0]["content"].value("text", "");
+        check(dtext.find("spatial.export_loom_manifest") != std::string::npos,
+              "deliver_to_iamf steers the agent to spatial.export_loom_manifest");
+        check(dtext.find("/tmp/iamf-demo") != std::string::npos,
+              "deliver_to_iamf substitutes the outDir argument");
+        check(dtext.find("order-3") != std::string::npos,
+              "deliver_to_iamf substitutes the scene order argument");
+        check(dtext.find("M-416") != std::string::npos,
+              "deliver_to_iamf carries the per-mix channel-budget warning (M-416)");
+        check(dtext.find("loom compile") != std::string::npos,
+              "deliver_to_iamf hands off to loom compile");
 
         // missing required argument -> -32602
         json gbad = {{"jsonrpc", "2.0"}, {"id", 163}, {"method", "prompts/get"},

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 James Livingston
 
-// prompts_expert.cpp — the 3 expert-workflow MCP prompts.
+// prompts_expert.cpp — the 4 expert-workflow MCP prompts.
 //
 // Each prompt is a declarative, client-visible template that steers an agent to drive the
 // semantic verbs in the right order for a common immersive outcome, so a non-expert user gets an
@@ -11,6 +11,9 @@
 //                                                                Dolby Renderer sends)
 //   encode_to_ambisonics  -> spatial.stereo_to_ambisonic / spatial.spatialize_stems
 //   master_for_delivery   -> mix.apply_style + analysis.check_deliverable  (loudness/TP conformance)
+//   deliver_to_iamf       -> spatial.export_loom_manifest      (bed/scene/VO stems + a
+//                                                                ready-to-compile iamf-loom manifest,
+//                                                                validated downstream by iamf-sentinel)
 //
 // Pure data + deterministic render(); no REAPER API. Every verb these templates steer toward is
 // implemented, and the whole flow is reproducible as a session.run_dsl macro. The loudness/true-peak
@@ -114,6 +117,53 @@ std::vector<PromptMessage> renderMasterForDelivery(const Json& args) {
     return {PromptMessage{"user", t}};
 }
 
+std::vector<PromptMessage> renderDeliverToIamf(const Json& args) {
+    const std::string outDir = argStr(args, "outDir", "<choose an output directory>");
+    const std::string bed = argStr(args, "bed", "7.1.4");
+    const std::string order = argStr(args, "sceneOrder", "0");
+    const std::string target = argStr(args, "target", "iamf");
+    const bool wantBed = bed != "none" && !bed.empty();
+    const bool wantScene = order != "0" && !order.empty();
+
+    std::string t;
+    t += "Deliver this REAPER session as an IAMF (open, royalty-free immersive) package";
+    if (wantBed) t += ", carrying the " + bed + " bed";
+    if (wantScene) t += std::string(wantBed ? " plus" : ", carrying") + " the order-" + order +
+                        " ambisonic scene";
+    t += ", via the iamf-loom / iamf-sentinel toolchain.\n\n";
+    t += "1. Inventory what will ship: confirm the bed bus and its channel count, any ambisonic "
+         "scene track (ACN/SN3D and its order), and any per-language VO tracks. "
+         "analysis.send_layout_inspect and spatial.get_scene_info help; report the roster before "
+         "exporting.\n";
+    t += "2. Check the per-mix channel budget BEFORE rendering: bed channels (stereo 2 / 5.1 6 / "
+         "7.1.4 12) + (sceneOrder+1)^2 + 2 per VO language. IAMF's largest per-mix profile cap "
+         "(base_enhanced) is 28 — a 7.1.4 bed + an order-3 scene + a stereo VO is 30 and loom "
+         "compile will refuse it (M-416). If over budget, propose delivering the scene at order 2 "
+         "(12+9+2 = 23 fits) or splitting bed and scene into separate mixes — ask me which.\n";
+    t += "3. Call spatial.export_loom_manifest with \"dryRun\": true first — e.g. { "
+         + std::string(wantBed ? "\"bedTrack\": <bed bus>, \"bedLayout\": \"" + bed + "\", " : "")
+         + (wantScene ? "\"sceneTrack\": <scene track>, \"sceneOrder\": " + order + ", " : "")
+         + "\"targets\": [{ \"format\": \"" + target + "\" }], \"outDir\": \"" + outDir +
+         "\", \"dryRun\": true } plus \"voTracks\": [{ \"track\": …, \"lang\": … }] rows for any "
+         "VO (preset \"youtube\" needs a \"video\" path on an mp4 target; preset \"archive\" is "
+         "the flac mezzanine) — and show me the composed manifest.yaml. The dry run renders "
+         "nothing; it is the pre-flight for step 2's budget and for naming problems the tool "
+         "warns about.\n";
+    t += "4. After I approve, re-issue without dryRun. The tool renders bit-exact 48 kHz "
+         "integer-PCM WAVs in Loom's channel order (the mapping is identity — no permutation) and "
+         "writes the loom: 0 manifest beside them. Report the outputs and echo the tool's `next` "
+         "field verbatim — it is the exact `loom compile` command to run outside REAPER.\n";
+    t += "5. Packaging and validation happen in the IAMF stack, not in REAPER: `loom compile` "
+         "validates the plan (no encoder toolchain needed), `loom run` encodes/muxes/measures and "
+         "gates every output through the iamf-sentinel validator. If the iamf-sentinel-mcp server "
+         "is connected to this client, drive that half agent-side (loom_compile, then iamf_validate "
+         "on the produced file) and relay the S-/M-code findings; otherwise hand me the commands.\n";
+    t += "6. Boundaries to state honestly: object tracks are NOT carried — the export fails closed "
+         "with the ADM pointer (M-309); objects ship via spatial.export_adm instead. And never "
+         "invent loudness numbers — Loom measures loudness itself during packaging.\n";
+    return {PromptMessage{"user", t}};
+}
+
 }  // namespace
 
 void registerExpertPrompts(PromptRegistry& reg) {
@@ -147,6 +197,18 @@ void registerExpertPrompts(PromptRegistry& reg) {
         {PromptArg{"spec", "Deliverable spec name, e.g. atmos-music, atsc-a85, streaming-stereo", true},
          PromptArg{"target", "Track/bus to master (default: the master)", false}},
         renderMasterForDelivery});
+
+    reg.add(Prompt{
+        "deliver_to_iamf",
+        "Deliver the session to IAMF (open immersive)",
+        "Render bed / ambisonic-scene / VO stems and emit a ready-to-compile iamf-loom manifest via "
+        "spatial.export_loom_manifest, then validate the packaged output with iamf-sentinel — the "
+        "open, royalty-free IAMF delivery pipeline (see MANUAL §9, Delivering to IAMF).",
+        {PromptArg{"outDir", "Directory to write the rendered stems + manifest.yaml into", true},
+         PromptArg{"bed", "Bed layout: stereo, 5.1, 7.1.4, or none (default 7.1.4)", false},
+         PromptArg{"sceneOrder", "Ambisonic scene order 1-4, or 0 for no scene (default 0)", false},
+         PromptArg{"target", "Delivery target: iamf, mp4, or preview; presets youtube / archive (default iamf)", false}},
+        renderDeliverToIamf});
 }
 
 }  // namespace reaper_mcp

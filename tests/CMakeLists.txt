@@ -137,6 +137,17 @@ add_test(NAME unit.damf COMMAND reaper_mcp_damf_test)
 add_executable(reaper_mcp_bed_weights_test unit/test_bed_weights.cpp)
 target_include_directories(reaper_mcp_bed_weights_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME unit.bed_weights COMMAND reaper_mcp_bed_weights_test)
+# --- Unit: Batch P2 Inseglet -> iamf-loom bridge core (loom_manifest.h; header-only, no REAPER) ---
+# Pure SDK-free logic: the Inseglet<->Loom channel-order mapping pin, the identity-tone verification
+# of the Loom-order WAV writer (B4 method, independent in-test RIFF reader + Goertzel), the golden
+# `loom: 0` manifest / season.yaml emissions, and the emission rules (never a loudness value; M-207
+# slugging; the S-208 default-name trap).
+add_executable(reaper_mcp_loom_manifest_test unit/test_loom_manifest.cpp)
+target_include_directories(reaper_mcp_loom_manifest_test PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${REAPER_MCP_DEP_INCLUDE_DIRS})
+target_link_libraries(reaper_mcp_loom_manifest_test PRIVATE Threads::Threads)
+add_test(NAME unit.loom_manifest COMMAND reaper_mcp_loom_manifest_test)
+
 
 # --- Unit: Batch L1 object send-layout orchestration core (send_layout.h; header-only, no REAPER) ---
 # Pure SDK-free logic: the bed-first renderer input roster, the send I_SRCCHAN/I_DSTCHAN encode/decode

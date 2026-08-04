@@ -37,16 +37,17 @@ int main() {
     PromptRegistry reg;
     registerExpertPrompts(reg);
 
-    check(reg.size() == 3, "registerExpertPrompts registers 3 prompts");
+    check(reg.size() == 4, "registerExpertPrompts registers 4 prompts");
 
     // ---- listJson: shape + deterministic order ----
     const json list = reg.listJson();
     check(list.contains("prompts") && list["prompts"].is_array(), "listJson has prompts[]");
     const json& ps = list["prompts"];
-    check(ps.size() == 3, "listJson lists all 3");
-    check(ps[0].value("name", "") == "encode_to_ambisonics", "order[0] = encode_to_ambisonics");
-    check(ps[1].value("name", "") == "master_for_delivery", "order[1] = master_for_delivery");
-    check(ps[2].value("name", "") == "setup_atmos_session", "order[2] = setup_atmos_session");
+    check(ps.size() == 4, "listJson lists all 4");
+    check(ps[0].value("name", "") == "deliver_to_iamf", "order[0] = deliver_to_iamf");
+    check(ps[1].value("name", "") == "encode_to_ambisonics", "order[1] = encode_to_ambisonics");
+    check(ps[2].value("name", "") == "master_for_delivery", "order[2] = master_for_delivery");
+    check(ps[3].value("name", "") == "setup_atmos_session", "order[3] = setup_atmos_session");
     for (const auto& p : ps) {
         check(p.contains("description") && !p.value("description", "").empty(), "prompt has description");
         check(p.contains("title") && !p.value("title", "").empty(), "prompt has title");
@@ -60,10 +61,13 @@ int main() {
     const Prompt* enc = reg.find("encode_to_ambisonics");
     const Prompt* master = reg.find("master_for_delivery");
     const Prompt* setup = reg.find("setup_atmos_session");
-    check(enc && master && setup, "all three prompts are findable by name");
+    const Prompt* iamf = reg.find("deliver_to_iamf");
+    check(enc && master && setup && iamf, "all four prompts are findable by name");
     check(!requiredArgsOk(*enc, json::object()), "encode_to_ambisonics requires sourceBus");
     check(requiredArgsOk(*enc, json{{"sourceBus", "Music Bus"}}), "encode_to_ambisonics ok with sourceBus");
     check(!requiredArgsOk(*master, json::object()), "master_for_delivery requires spec");
+    check(!requiredArgsOk(*iamf, json::object()), "deliver_to_iamf requires outDir");
+    check(requiredArgsOk(*iamf, json{{"outDir", "/tmp/iamf-out"}}), "deliver_to_iamf ok with outDir");
 
     // ---- getJson: message shape + argument substitution ----
     {
@@ -100,6 +104,18 @@ int main() {
         check(text.find("atsc-a85") != std::string::npos, "master substitutes the spec name");
         check(text.find("check_deliverable") != std::string::npos, "steers toward analysis.check_deliverable");
         check(text.find("apply_style") != std::string::npos, "steers toward mix.apply_style");
+    }
+    {
+        const json g = PromptRegistry::getJson(*iamf, json{{"outDir", "/tmp/iamf-demo"}, {"sceneOrder", "3"}});
+        const std::string text = g["messages"][0]["content"].value("text", "");
+        check(text.find("/tmp/iamf-demo") != std::string::npos, "iamf substitutes the outDir");
+        check(text.find("order-3") != std::string::npos, "iamf substitutes the scene order (3)");
+        check(text.find("export_loom_manifest") != std::string::npos,
+              "steers toward spatial.export_loom_manifest");
+        check(text.find("M-416") != std::string::npos, "carries the per-mix channel-budget warning (M-416)");
+        check(text.find("loom compile") != std::string::npos, "hands off to loom compile");
+        check(text.find("M-309") != std::string::npos, "states the objects-fail-closed boundary (M-309)");
+        check(text.find("dryRun") != std::string::npos, "steers a dryRun pre-flight first");
     }
 
     if (g_failures == 0) { std::fprintf(stderr, "ALL PROMPT CHECKS PASSED\n"); return 0; }

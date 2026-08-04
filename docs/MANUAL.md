@@ -1,6 +1,6 @@
 % Inseglet — User Manual
 % A native REAPER extension exposing a Model Context Protocol interface
-% Version 1.5.0 · 2026
+% Version 1.6.0 · 2026
 
 ---
 
@@ -13,14 +13,14 @@ This manual covers installation, connecting a client, the concepts you need, a c
 server can do, worked examples, and troubleshooting. For the exhaustive, machine-generated schema of
 every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from the live registry).
 
-> This document is written for v1.5.0. Inseglet currently targets **macOS first**;
+> This document is written for v1.6.0. Inseglet currently targets **macOS first**;
 > Windows and Linux build in CI and follow once load-verified in a real REAPER.
 
 ---
 
 ## 1. Overview
 
-Inseglet exposes **186 tools**, plus MCP **resources** (live project state you can read and subscribe
+Inseglet exposes **187 tools**, plus MCP **resources** (live project state you can read and subscribe
 to) and expert **prompts**, over a local HTTP endpoint that speaks the MCP `2025-06-18` protocol. The
 tools span everyday DAW work and a deep immersive/spatial layer:
 
@@ -32,6 +32,8 @@ tools span everyday DAW work and a deep immersive/spatial layer:
   spatial-field analysis, downmix/binaural checks, decode coverage, loudness timelines.
 - **Object / Atmos deliverables** — author an ITU-R BS.2076 ADM Broadcast-Wave, with a conformance mode
   shaped to the published Dolby Atmos Master ADM Profile, and a validator for any ADM BWF.
+- **IAMF delivery** — a one-call bridge to the open IAMF toolchain: render bed/scene/VO stems and emit
+  a ready-to-compile `iamf-loom` manifest (see §9, *Delivering to IAMF*).
 - **Semantic / agentic helpers** — named deliverable specs, immersive-aware style chains, and a
   deterministic composite macro-DSL for multi-step, single-undo operations.
 
@@ -180,7 +182,7 @@ known modal or fatal actions can't be triggered blindly (see `SECURITY.md` and t
 ## 7. What Inseglet can do (tool catalog)
 
 The full, machine-generated reference — every parameter and output schema — is in **`docs/REFERENCE.md`**.
-The summary below orients you by area. Counts are for the v1.5.0 surface (186 tools total).
+The summary below orients you by area. Counts are for the v1.6.0 surface (187 tools total).
 
 | Area (profile) | Tools | What's in it |
 |---|---|---|
@@ -189,7 +191,7 @@ The summary below orients you by area. Counts are for the v1.5.0 surface (186 to
 | **Mixing** (`mixing`) | 27 | Track & take FX (list/add/remove/enable/preset, parameter get/set), automation envelopes (points, ranges, automation mode), faders, master FX, and immersive-aware style chains with a bundled multichannel true-peak limiter. |
 | **Routing** (`routing`) | 8 | Track-to-track sends and receives (add/list/remove/set level & channels) and channel-count management. |
 | **MIDI** (`midi`) | 23 | Takes plus MIDI note and CC create/read/update/delete, batch note insert, selection filters, and groove/quantization — quantize (grid + swing), humanize, groove-template extract & apply, transpose, velocity scaling, legato, nudge, and time-stretch. |
-| **Render** (`render`) | 4 | Multichannel / immersive deliverable rendering, plus native ADM BWF and Dolby Atmos Master File (DAMF) triad master authoring. |
+| **Render** (`render`) | 5 | Multichannel / immersive deliverable rendering, native ADM BWF and Dolby Atmos Master File (DAMF) triad master authoring, plus the IAMF delivery bridge (`spatial.export_loom_manifest` — Loom-order stems + a ready-to-compile `iamf-loom` manifest). |
 | **Analysis** (`analysis`) | 18 | Gated loudness (program, stem, dialog, per-object), true-peak, ambisonic spatial-field analysis, downmix & binaural QC, decode coverage, loudness timelines, named deliverable-spec conformance, ADM inspection / profile conformance checking, DAMF (Dolby Atmos Master File) triad inspection, renderer-bus send-layout inspection (roster QC), and render-free direct sample reads / accessor metering / frame-accurate silence detection via a REAPER audio accessor, and per-object decode-coverage timelines that track how each immersive object migrates across the delivery loudspeakers over time. |
 | **Composite / DSL** (`full`) | 1 | `session.run_dsl` — a deterministic composite macro-DSL with `$ref`/capture and atomic single-undo, for multi-step operations. |
 
@@ -241,7 +243,85 @@ planned diff before applying.
 
 ---
 
-## 9. Coordinate & channel conventions
+## 9. Delivering to IAMF
+
+IAMF (Immersive Audio Model and Formats) is the Alliance for Open Media's **open, royalty-free
+immersive audio delivery format**. Inseglet can hand a finished immersive session straight to the
+open-source IAMF toolchain — the [`iamf-loom`](https://github.com/jlivingston-Cipher/iamf-loom)
+packager and the [`iamf-sentinel`](https://github.com/jlivingston-Cipher/iamf-sentinel) conformance
+validator — so the same session that authors an ADM master can also ship an `.iamf` (or IAMF-in-MP4)
+deliverable:
+
+```
+REAPER session ──spatial.export_loom_manifest──►  stems + manifest.yaml
+                                                   │  loom compile   (plan; no toolchain needed)
+                                                   │  loom run       (encode + mux + measure)
+                                                   ▼
+                                              .iamf / .mp4 — every output gated by iamf-sentinel
+```
+
+### 9.1 One call: `spatial.export_loom_manifest`
+
+`spatial.export_loom_manifest` renders the session's **channel bed** (stereo, 5.1, or 7.1.4) and/or
+**ambisonic scene** (order 1–4, ACN/SN3D), plus optional per-language **VO stems**, through the same
+bit-exact render machinery as the ADM exporter — as 48 kHz integer-PCM WAVs in Loom's channel order —
+and writes the `loom: 0` **manifest** (plus an optional `season.yaml` batch spec) beside them. The
+result compiles as-is:
+
+```bash
+loom compile <outDir>/manifest.yaml     # validate the plan — no encoder toolchain required
+loom run     <outDir>/manifest.yaml     # encode, mux, measure; outputs gated by iamf-sentinel
+```
+
+The tool echoes the exact follow-up command in its `next` field, and `dryRun: true` returns the
+composed manifest YAML **without rendering anything** — use it to preview the plan (and catch
+channel-budget problems, below) before committing to a render.
+
+Details worth knowing:
+
+- **Channel order is identity-mapped.** Inseglet's and Loom's 7.1.4 orders are physically identical
+  at every index; only two label spellings differ (`Lsr`/`Rsr` ≡ `Lrs`/`Rrs`, `Ltr`/`Rtr` ≡
+  `Ltb`/`Rtb`). No permutation happens at the seam — this is verified per-channel in the test suite.
+- **Loudness is never invented.** Loom *measures* loudness during packaging; Inseglet never writes a
+  loudness number into the manifest.
+- **Objects fail closed.** IAMF v1.x delivery here covers beds and ambisonic scenes. Object tracks
+  make the export refuse with a pointer to the ADM route — `spatial.export_adm` is how object
+  masters leave the building (Loom reports this as its `M-309` diagnostic class).
+- **Targets & presets.** `targets[]` selects `iamf` / `mp4` / `preview` outputs with presets such as
+  `youtube` (requires a video track to mux against) and `archive` (FLAC-coded `.iamf`); the export
+  fails closed on invalid combinations rather than emitting a plan Loom would reject.
+
+### 9.2 Mind the per-mix channel budget (M-416)
+
+IAMF profiles cap the channels in one mix presentation — the largest cap (`base_enhanced`)
+is **28 channels per mix**. A full-fat authoring session can exceed it:
+
+> A 7.1.4 bed (12) + an order-3 ambisonic scene (16) + a stereo VO (2) = **30 channels** in one
+> presentation — more than any per-mix profile allows. `loom compile` refuses this with **M-416**,
+> by design: the bridge defers profile arithmetic to Loom rather than second-guessing it.
+>
+> The usual fix: deliver the scene at **order 2** (9 channels; 12 + 9 + 2 = 23 fits
+> `base_enhanced`), or split the bed and scene into separate mixes/targets. `dryRun: true` plus a
+> `loom compile` of the composed manifest pre-flights the budget before any audio is rendered.
+
+### 9.3 Validate and repair
+
+`loom run` gates every output through `iamf-sentinel` automatically. You can also validate any IAMF
+file independently (`pip install iamf-sentinel`, then run the validator on the file), and if your
+MCP client has the [`iamf-sentinel-mcp`](https://github.com/jlivingston-Cipher/iamf-sentinel-mcp)
+server connected alongside Inseglet, the whole loop stays agent-driven in one conversation: author
+here, then `loom_compile` / `iamf_validate` there. Findings come back as stable S-codes (validator)
+and M-codes (packager); fix the reported condition in session terms — layout, order, routing, target
+choice — and re-export. The `deliver_to_iamf` expert prompt packages this workflow for your client's
+prompt picker.
+
+> Inseglet and the IAMF stack are separate projects with a deliberate seam: Inseglet authors and
+> renders; `iamf-loom` packages; `iamf-sentinel` is the conformance authority. Nothing in Inseglet
+> re-implements IAMF validation.
+
+---
+
+## 10. Coordinate & channel conventions
 
 Inseglet uses consistent conventions across the spatial and metering layers; the authority is
 **`docs/CONVENTIONS.md`**. In brief: azimuth 0° is front and positive azimuth rotates counter-clockwise
@@ -252,7 +332,7 @@ SMPTE/ITU-R BS.2051 conventions documented there. If you script placement by des
 
 ---
 
-## 10. Troubleshooting
+## 11. Troubleshooting
 
 **Commands hang or nothing happens.** Make sure REAPER is in the **foreground** — App Nap on macOS
 suspends the timer that drains the command queue. Bring REAPER to the front and retry.
@@ -281,7 +361,7 @@ test tier for this preview. The end-to-end integration harness is currently a **
 
 ---
 
-## 11. Security
+## 12. Security
 
 Inseglet listens only on the **loopback interface** (`127.0.0.1`) and requires a **bearer token** for
 every request. The token and port are written to the discovery file in your REAPER resource directory. On
@@ -292,7 +372,7 @@ rather than in a public issue.
 
 ---
 
-## 12. Help, contributing, and license
+## 13. Help, contributing, and license
 
 - **Questions & ideas:** GitHub Discussions on the project repository.
 - **Bugs & features:** GitHub Issues (templates provided).

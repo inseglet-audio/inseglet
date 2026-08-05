@@ -15,6 +15,8 @@
 
 #include "mcp_server.h"
 
+#include "inseglet_version.h"
+
 #include <chrono>
 #include <cstring>
 #include <random>
@@ -29,7 +31,7 @@ namespace {
 
 constexpr char kProtocolVersion[] = "2025-06-18";
 constexpr char kServerName[] = "reaper_mcp";
-constexpr char kServerVersion[] = "1.6.0";
+constexpr const char* kServerVersion = ::reaper_mcp::kInsegletVersion;
 
 std::string randomHex(int bytes) {
     std::random_device rd;

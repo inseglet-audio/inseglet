@@ -2303,6 +2303,44 @@ int main() {
               "analysis.adm_profile_check on a missing file returns file_not_found");
     }
 
+    // --- 2l''. B1 R1/R2: the intentSidecar param on both export verbs -----------------
+    // Host build: the param flows through and the response echoes the planned sidecar path; the
+    // emitter itself is proven in unit.intent_sidecar. Negative control: without the param the
+    // response carries NO intentSidecarPath key (additive surface only).
+    {
+        json req = {{"jsonrpc", "2.0"}, {"id", 945}, {"method", "tools/call"},
+                    {"params", {{"name", "spatial.export_adm"},
+                                {"arguments", {{"bedTrack", 0}, {"bedLayout", "5.1"},
+                                               {"outPath", "X/prog.wav"},
+                                               {"intentSidecar", true}, {"dryRun", true}}}}}};
+        json resp = rpc(cli, cfg.token, req);
+        const json& sc = resp["result"]["structuredContent"];
+        check(resp["result"].value("isError", false) == false,
+              "export_adm with intentSidecar dispatches (host)");
+        check(sc.value("intentSidecarPath", "") == "X/prog.intent.json",
+              "export_adm echoes the planned sidecar path (extension swap)");
+
+        json lreq = {{"jsonrpc", "2.0"}, {"id", 946}, {"method", "tools/call"},
+                     {"params", {{"name", "spatial.export_loom_manifest"},
+                                 {"arguments", {{"bedTrack", 0}, {"bedLayout", "7.1.4"},
+                                                {"outDir", "Y"},
+                                                {"intentSidecar", true}, {"dryRun", true}}}}}};
+        json lresp = rpc(cli, cfg.token, lreq);
+        const json& lsc = lresp["result"]["structuredContent"];
+        check(lresp["result"].value("isError", false) == false,
+              "export_loom_manifest with intentSidecar dispatches (host)");
+        check(lsc.value("intentSidecarPath", "") == "Y/manifest.intent.json",
+              "export_loom_manifest echoes manifest.intent.json beside the manifest");
+
+        json noReq = {{"jsonrpc", "2.0"}, {"id", 947}, {"method", "tools/call"},
+                      {"params", {{"name", "spatial.export_adm"},
+                                  {"arguments", {{"bedTrack", 0}, {"bedLayout", "5.1"},
+                                                 {"dryRun", true}}}}}};
+        json noResp = rpc(cli, cfg.token, noReq);
+        check(!noResp["result"]["structuredContent"].contains("intentSidecarPath"),
+              "negative control: no intentSidecar param -> no intentSidecarPath key");
+    }
+
     // --- 2q. Batch B1 (audio accessors): read_samples / accessor_meter / detect_silence ----------
     // Host build has no REAPER accessor, so this exercises presence + dispatch + the host-path shape;
     // the SDK-free DSP (DC/clip/overview/silence scan) is proven in unit.meter and the accessor

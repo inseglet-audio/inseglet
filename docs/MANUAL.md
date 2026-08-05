@@ -319,6 +319,22 @@ prompt picker.
 > renders; `iamf-loom` packages; `iamf-sentinel` is the conformance authority. Nothing in Inseglet
 > re-implements IAMF validation.
 
+### 9.4 Intent-conformance QC: the intent sidecar
+
+Structural validation answers "is this file well-formed?"; the intent sidecar answers a different
+question — **"does this file render as the session intended?"**. Pass `intentSidecar: true` to
+`spatial.export_adm` or `spatial.export_loom_manifest` and the tool writes the session's own
+predictions beside the export (`<base>.intent.json` / `manifest.intent.json`, schema `intent: 0`):
+the bed roster with expected per-channel levels, each object's position trajectory and predicted
+decode dominance, per-ACN scene levels — every level a measured `expect*` claim about a stem,
+**never a declared deliverable loudness** (Loom still measures; that is the point of it). Then
+`sentinel intent-compare <sidecar> <delivered.wav>` (iamf-sentinel-pro) verifies the delivered
+file against those claims and reports S-340…S-346 — dropped gains, zeroed positions,
+wrong-channel folds, muted objects: files that are structurally valid, loudness-conformant, and
+wrong. Beds outside the consumer's judged set (5.1 / 7.1 / 7.1.4 — e.g. a 7.1.2 or 9.1.6 export)
+emit no bed claims (absent block = absent claim, never a false failure), and VO stems carry no
+claims in the v0 schema.
+
 ---
 
 ## 10. Coordinate & channel conventions

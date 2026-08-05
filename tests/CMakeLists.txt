@@ -164,6 +164,25 @@ add_executable(reaper_mcp_decode_timeline_test unit/test_decode_timeline.cpp)
 target_include_directories(reaper_mcp_decode_timeline_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME unit.decode_timeline COMMAND reaper_mcp_decode_timeline_test)
 
+# --- Unit: B1 R1/R2 intent-sidecar emitter core (intent_sidecar.h; header-only, no REAPER) ---
+# Pure SDK-free logic: the judged-layout second witness, byte-golden schema-v0 emissions, the
+# decode-prediction identity with decode_timeline, the block reach-time convention, the
+# forbidden-key scan (never a deliverable-loudness key), and the consumer measurement mirrors.
+add_executable(reaper_mcp_intent_sidecar_test unit/test_intent_sidecar.cpp)
+target_include_directories(reaper_mcp_intent_sidecar_test PRIVATE
+  ${CMAKE_SOURCE_DIR}/src ${REAPER_MCP_DEP_INCLUDE_DIRS})
+target_link_libraries(reaper_mcp_intent_sidecar_test PRIVATE Threads::Threads)
+add_test(NAME unit.intent_sidecar COMMAND reaper_mcp_intent_sidecar_test)
+
+# --- Unit: D3 representation-aware positional-param discovery (position_params.h) ---
+# Pure SDK-free logic: the az/el-first classifier (angle rosters never letter-scanned; quaternion
+# components never matched), set_source_position's strict source-token semantics preserved, and
+# the angle-space composition of partial cartesian requests. Carries the negative control that
+# REPRODUCES the pre-D3 defect (bare-letter scan -> "Quaternion X" / "aZimuth angle"-as-z).
+add_executable(reaper_mcp_position_params_test unit/test_position_params.cpp)
+target_include_directories(reaper_mcp_position_params_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME unit.position_params COMMAND reaper_mcp_position_params_test)
+
 # --- Integration tests (require a REAPER install; opt-in) ---
 # Run: ctest -R integration  (needs REAPER_BIN env var pointing at the REAPER executable)
 add_test(

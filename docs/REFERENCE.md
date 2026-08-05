@@ -7320,7 +7320,7 @@ Returns a structured object with: `automationParams`, `fxIndex`, `ok`, `roomEnco
 
 **Profile:** `spatial` · **Hints:** idempotent
 
-Position a source in the surround panner. Give x/y in [-1,1] (or azimuthDeg[/elevationDeg]) and optional z height; values are written normalized ([0,1], centre 0.5) so any param range is safe. Param indices are discovered by name; pass paramX/paramY/paramZ (from spatial.get_surround_state) to drive them deterministically.
+Position a source in the surround panner. Give x/y in [-1,1] (or azimuthDeg[/elevationDeg]) and optional z height. Angle-representation panners (IEM/SPARTA-style encoders exposing Azimuth/Elevation params) are driven in azimuth/elevation — derived from x/y/z when needed, mapped onto each param's own degree range, and partial writes preserve the untouched axis (z alone never recenters azimuth). Cartesian panners (ReaSurroundPan) take normalized writes ([0,1], centre 0.5) discovered by letter, never matching quaternion params. Pass paramX/paramY/paramZ (from spatial.get_surround_state) or normalizedInput to force deterministic cartesian writes.
 
 **Parameters**
 
@@ -12928,7 +12928,7 @@ Returns a structured object with: `dryRun`, `ok`, `stats`, `targets`, `warnings`
 
 **Profile:** `render` · **Hints:** mutating
 
-Author a native ITU-R BS.2076 ADM object-audio deliverable — a Broadcast-Wave (RIFF/WAVE, or BW64/RF64 per BS.2088 when >4 GiB) carrying a chna (channel allocation) + axml (the ADM XML) chunk beside the interleaved PCM. This is a capability REAPER lacks natively (see spatial.render_deliverables' atmos-send-layout, which can only wire the topology to an EXTERNAL Dolby Renderer). The deliverable = a DirectSpeakers BED (bedTrack at bedLayout, e.g. Atmos 7.1.2) plus N mono OBJECTS (objectTracks), each object carrying a position/gain TRAJECTORY (audioBlockFormat time-slices) SAMPLED from its panner automation over the render window (spherical az/el/distance by default; coordinateMode:cartesian emits X/Y/Z). Bed + object stems are rendered bit-exact (RENDER_* snapshot/restore, temps deleted); each object's mono essence = its rendered channel 1, its position = read from the object panner's azimuth/elevation/distance params (best-effort, like analysis.object_loudness). dryRun (the DEFAULT is false) samples the positions + plans the ADM model WITHOUT rendering or writing. Bound long programmes with boundsFlag=0 + startPos/endPos (a render blocks the main thread). Ingest-verify the file against your certified renderer (Dolby/EBU/Nuendo); inspect it with analysis.adm_inspect. Attach per-object BS.2076 metadata via objectMetadata[] (each entry keyed by its object 'track'): extent — a 'size' 0..1 knob (sets width=height=depth; the ADM normalized object size, natural in cartesian mode) or explicit width/height/depth (spherical: width/height in DEGREES, depth 0..1); objectDivergence — 'divergence' 0..1 (split into two mirror copies) with an optional 'divergenceRange' (azimuthRange deg in spherical / positionRange 0..1 in cartesian; defaults 45°/0.5); and 'importance' 0..10 (a renderer may drop lower-importance objects under load). Objects with no entry stay point sources with importance omitted. Set profile:"dolby-atmos" to author a Dolby Atmos Master ADM Profile v1.0-conformant file: it forces cartesian objects (X/Y/Z clamped [-1,1]), collapses extent to an identical [0,1] size, STRIPS objectDivergence (prohibited) and importance (permitted only on inactive objects), and emits the interpolationLength ramp (0 then 250 samples); it FAILS CLOSED on a non-Atmos bed (7.1.4/9.1.6/22.2 — route those channels as objects), a non-48k render, or >118 objects / >128 channels. The applied normalizations are echoed in 'profile'. Validate any ADM BWF's conformance with analysis.adm_profile_check. (Profile-shaped + self-validated; certified-renderer ingest is your check.)
+Author a native ITU-R BS.2076 ADM object-audio deliverable — a Broadcast-Wave (RIFF/WAVE, or BW64/RF64 per BS.2088 when >4 GiB) carrying a chna (channel allocation) + axml (the ADM XML) chunk beside the interleaved PCM. This is a capability REAPER lacks natively (see spatial.render_deliverables' atmos-send-layout, which can only wire the topology to an EXTERNAL Dolby Renderer). The deliverable = a DirectSpeakers BED (bedTrack at bedLayout, e.g. Atmos 7.1.2) plus N mono OBJECTS (objectTracks), each object carrying a position/gain TRAJECTORY (audioBlockFormat time-slices) SAMPLED from its panner automation over the render window (spherical az/el/distance by default; coordinateMode:cartesian emits X/Y/Z). Bed + object stems are rendered bit-exact (RENDER_* snapshot/restore, temps deleted); each object's mono essence = its rendered channel 1, its position = read from the object panner's azimuth/elevation/distance params (best-effort, like analysis.object_loudness). dryRun (the DEFAULT is false) samples the positions + plans the ADM model WITHOUT rendering or writing. Bound long programmes with boundsFlag=0 + startPos/endPos (a render blocks the main thread). Ingest-verify the file against your certified renderer (Dolby/EBU/Nuendo); inspect it with analysis.adm_inspect. Attach per-object BS.2076 metadata via objectMetadata[] (each entry keyed by its object 'track'): extent — a 'size' 0..1 knob (sets width=height=depth; the ADM normalized object size, natural in cartesian mode) or explicit width/height/depth (spherical: width/height in DEGREES, depth 0..1); objectDivergence — 'divergence' 0..1 (split into two mirror copies) with an optional 'divergenceRange' (azimuthRange deg in spherical / positionRange 0..1 in cartesian; defaults 45°/0.5); and 'importance' 0..10 (a renderer may drop lower-importance objects under load). Objects with no entry stay point sources with importance omitted. Set profile:"dolby-atmos" to author a Dolby Atmos Master ADM Profile v1.0-conformant file: it forces cartesian objects (X/Y/Z clamped [-1,1]), collapses extent to an identical [0,1] size, STRIPS objectDivergence (prohibited) and importance (permitted only on inactive objects), and emits the interpolationLength ramp (0 then 250 samples); it FAILS CLOSED on a non-Atmos bed (7.1.4/9.1.6/22.2 — route those channels as objects), a non-48k render, or >118 objects / >128 channels. The applied normalizations are echoed in 'profile'. Validate any ADM BWF's conformance with analysis.adm_profile_check. (Profile-shaped + self-validated; certified-renderer ingest is your check.) intentSidecar:true additionally writes <base>.intent.json beside the export — the session's own predictions (schema `intent: 0`: roster + trajectories + decode dominance + expect* levels, NEVER a declared loudness) which `sentinel intent-compare` verifies against the delivered file (S-340..S-346, the intent-conformance QC loop).
 
 **Parameters**
 
@@ -12943,6 +12943,7 @@ Author a native ITU-R BS.2076 ADM object-audio deliverable — a Broadcast-Wave 
 | `coordinateMode` | enum | no | one of: `spherical`, `cartesian`; default `"spherical"` |
 | `dryRun` | boolean | no | default `false` |
 | `endPos` | number | no | — |
+| `intentSidecar` | boolean | no | default `false` |
 | `maxBlocks` | integer | no | default `1000`; min 1 |
 | `objectMetadata` | array&lt;object&gt; | no | — |
 | `objectTracks` | array&lt;integer&gt; | no | — |
@@ -12956,7 +12957,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`, `channels`, `container`, `coordinateMode`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `note`, `objectCount`, `objectMetadataCount`, `objects`, `ok`, `path`, `profile`, `remediation`, `sampleRate`, `warnings`.
+Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`, `channels`, `container`, `coordinateMode`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `intentSidecarPath`, `note`, `objectCount`, `objectMetadataCount`, `objects`, `ok`, `path`, `profile`, `remediation`, `sampleRate`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -13018,6 +13019,10 @@ Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`,
       },
       "endPos": {
         "type": "number"
+      },
+      "intentSidecar": {
+        "default": false,
+        "type": "boolean"
       },
       "maxBlocks": {
         "default": 1000,
@@ -13139,6 +13144,12 @@ Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`,
       },
       "frames": {
         "type": "integer"
+      },
+      "intentSidecarPath": {
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "note": {
         "type": "string"
@@ -13390,7 +13401,7 @@ Returns a structured object with: `basePath`, `bedChannels`, `bedLayout`, `bitDe
 
 **Profile:** `render` · **Hints:** mutating
 
-Export the session's immersive program as an iamf-loom package source: render the bed and/or ambisonic scene (plus optional per-language VO stems) to 48 kHz integer-PCM WAVs in Loom's channel order and emit the `loom: 0` YAML manifest beside them — one tool call, then `loom compile manifest.yaml` (the response echoes the exact next command). iamf-loom is the open manifest-driven IAMF packager (github.com/jlivingston-Cipher/iamf-loom): manifest + WAVs in, measured-loudness IAMF/MP4/binaural-preview deliverables out, each gated by the iamf-sentinel validator. v1 scope = Loom's Phase-1 source set: beds stereo/5.1/7.1.4 (bedTrack at bedLayout; channel order is IDENTICAL to Inseglet's film order — verified with per-channel identity tones; only label SPELLINGS differ: Lsr/Rsr==Lrs/Rrs, Ltr/Rtr==Ltb/Rtb) and ambisonic scenes of order 1-4 (sceneTrack; ACN/SN3D, the native scene convention; REAPER's even-channel padding is dropped at write; pass sceneOrder to truncate a higher-order scene). OBJECTS ARE OUT of v1 — Loom's `kind: adm` object ingest (M-309) is reserved; this tool FAILS CLOSED on objectTracks (author object masters with spatial.export_adm today) rather than folding objects silently. targets[] maps to Loom targets: iamf (raw .iamf; preset archive = lossless flac mezzanine), mp4 (A/V mux; video: required for preset youtube), preview (binaural review copy — the presentation is declared `headphones: binaural` automatically, Loom's M-402 rule). voTracks[] rows (track+lang+label) become a `languages:` block: one presentation per language, per-mix measured loudness. episodes[] additionally emits a season.yaml batch spec with {episode}-templated outputs for `loom batch`. NEVER EMITS A LOUDNESS VALUE — Loom measures loudness (that is the point of it); policy.loudness.normalize appears only when you pass normalize. The manifest is schema-shaped for `loom: 0`; `loom compile` is the authority (this tool refuses only the combinations Loom is known to reject: youtube without video / M-404, archive off-iamf or non-flac / M-402, normalize with lpcm / M-402, non-48k renders / M-308). Stems render bit-exact (RENDER_* snapshot/restore, temps deleted); bound long programmes with boundsFlag=0 + startPos/endPos (a render blocks the main thread). dryRun (DEFAULT false) plans sources + targets and returns the manifest YAML WITHOUT rendering or writing.
+Export the session's immersive program as an iamf-loom package source: render the bed and/or ambisonic scene (plus optional per-language VO stems) to 48 kHz integer-PCM WAVs in Loom's channel order and emit the `loom: 0` YAML manifest beside them — one tool call, then `loom compile manifest.yaml` (the response echoes the exact next command). iamf-loom is the open manifest-driven IAMF packager (github.com/jlivingston-Cipher/iamf-loom): manifest + WAVs in, measured-loudness IAMF/MP4/binaural-preview deliverables out, each gated by the iamf-sentinel validator. v1 scope = Loom's Phase-1 source set: beds stereo/5.1/7.1.4 (bedTrack at bedLayout; channel order is IDENTICAL to Inseglet's film order — verified with per-channel identity tones; only label SPELLINGS differ: Lsr/Rsr==Lrs/Rrs, Ltr/Rtr==Ltb/Rtb) and ambisonic scenes of order 1-4 (sceneTrack; ACN/SN3D, the native scene convention; REAPER's even-channel padding is dropped at write; pass sceneOrder to truncate a higher-order scene). OBJECTS ARE OUT of v1 — Loom's `kind: adm` object ingest (M-309) is reserved; this tool FAILS CLOSED on objectTracks (author object masters with spatial.export_adm today) rather than folding objects silently. targets[] maps to Loom targets: iamf (raw .iamf; preset archive = lossless flac mezzanine), mp4 (A/V mux; video: required for preset youtube), preview (binaural review copy — the presentation is declared `headphones: binaural` automatically, Loom's M-402 rule). voTracks[] rows (track+lang+label) become a `languages:` block: one presentation per language, per-mix measured loudness. episodes[] additionally emits a season.yaml batch spec with {episode}-templated outputs for `loom batch`. NEVER EMITS A LOUDNESS VALUE — Loom measures loudness (that is the point of it); policy.loudness.normalize appears only when you pass normalize. The manifest is schema-shaped for `loom: 0`; `loom compile` is the authority (this tool refuses only the combinations Loom is known to reject: youtube without video / M-404, archive off-iamf or non-flac / M-402, normalize with lpcm / M-402, non-48k renders / M-308). Stems render bit-exact (RENDER_* snapshot/restore, temps deleted); bound long programmes with boundsFlag=0 + startPos/endPos (a render blocks the main thread). dryRun (DEFAULT false) plans sources + targets and returns the manifest YAML WITHOUT rendering or writing. intentSidecar:true additionally writes manifest.intent.json beside the manifest — the session's own predictions for the bed/scene stems (schema `intent: 0`: roster + expect* levels + per-ACN scene RMS, NEVER a declared loudness — Loom still measures) for `sentinel intent-compare` once the deliverable exists (VO stems carry no claims in v0).
 
 **Parameters**
 
@@ -13404,6 +13415,7 @@ Export the session's immersive program as an iamf-loom package source: render th
 | `dryRun` | boolean | no | default `false` |
 | `endPos` | number | no | — |
 | `episodes` | array&lt;string&gt; | no | — |
+| `intentSidecar` | boolean | no | default `false` |
 | `normalize` | number | no | — |
 | `objectTracks` | array&lt;integer&gt; | no | — |
 | `outDir` | string | no | — |
@@ -13419,7 +13431,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `manifestYaml`, `next`, `note`, `ok`, `outDir`, `path`, `remediation`, `sampleRate`, `seasonPath`, `sources`, `targets`, `title`, `warnings`, `wavs`.
+Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `intentSidecarPath`, `manifestYaml`, `next`, `note`, `ok`, `outDir`, `path`, `remediation`, `sampleRate`, `seasonPath`, `sources`, `targets`, `title`, `warnings`, `wavs`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -13475,6 +13487,10 @@ Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `d
           "type": "string"
         },
         "type": "array"
+      },
+      "intentSidecar": {
+        "default": false,
+        "type": "boolean"
       },
       "normalize": {
         "type": "number"
@@ -13589,6 +13605,12 @@ Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `d
       },
       "frames": {
         "type": "integer"
+      },
+      "intentSidecarPath": {
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "manifestYaml": {
         "type": "string"

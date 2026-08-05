@@ -42,6 +42,7 @@
 
 #include "control_surface.h"
 #include "discovery.h"
+#include "inseglet_version.h"
 #include "main_thread_queue.h"
 #include "mcp_server.h"
 #include "prompt_registry.h"
@@ -142,7 +143,7 @@ void writeDiscovery() {
                  {"authHeader", "Authorization: Bearer " + g_server->token()},
                  {"protocol", "2025-06-18"},
                  {"server", "reaper_mcp"},
-                 {"version", "1.6.0"},
+                 {"version", kInsegletVersion},
                  {"pid", currentPid()}};
     writeDiscoveryFile(g_discoveryPath, info);
 }

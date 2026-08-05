@@ -80,9 +80,13 @@
 #include "../adm_profile.h"    // Dolby Atmos Master ADM Profile normalize + validate
 #include "../damf.h"           // native Dolby Atmos Master File (DAMF) triad serializer (spatial.export_damf)
 #include "../loom_manifest.h"  // Inseglet -> iamf-loom bridge: manifest/season emitters + Loom-order WAV writer
+#include "../intent_sidecar.h" // B1 R1/R2: schema-v0 intent-sidecar emitter + prediction helpers
+#include "../inseglet_version.h"  // the ONE in-source version string (producer stamp)
+#include "../bed_weights.h"    // F33-conformant BS.1770-4 channel weights (whole-bed expectLufs)
 #include "../send_layout.h"    // SDK-free object send-layout roster/encode/reconcile/inspect (Batch L1)
 #include "../tool_registry.h"
 #include "../spatial_verbs.h"  // SDK-free planning core (target/placement/plan) + composite_support
+#include "../position_params.h"  // D3: representation-aware positional-param discovery
 
 namespace reaper_mcp {
 
@@ -392,6 +396,21 @@ void angleDegRange(MediaTrack* t, int fx, int p, const std::string& key, double&
         loDeg = -s / 2.0;
         hiDeg = s / 2.0;
     }
+}
+
+// Read an angle param's CURRENT value in degrees: the plug-in's own formatted reading when it
+// parses, else a linear map of the normalized value onto angleDegRange. (D3: feeds the current
+// azimuth into posparam::composeTarget for single-horizontal-component writes.)
+double readCurAngleDeg(MediaTrack* t, int fx, int p, const std::string& key) {
+    const double nv = TrackFX_GetParamNormalized(t, fx, p);
+    char buf[128] = {0};
+    double deg = 0.0;
+    if (TrackFX_FormatParamValueNormalized(t, fx, p, nv, buf, (int)sizeof(buf)) &&
+        parseLeadingNumber(buf, deg))
+        return deg;
+    double lo = 0.0, hi = 0.0;
+    angleDegRange(t, fx, p, key, lo, hi);
+    return lo + nv * (hi - lo);
 }
 
 // Set a CONTINUOUS angle param (found by name) to `valueDeg` DEGREES. IEM/JUCE plug-ins expose angle
@@ -971,6 +990,43 @@ std::vector<adm::Block> objectTrajectory(MediaTrack* t, double startWin, double 
     }
     return blocks;
 }
+
+// ---- intent-sidecar measurement helpers (B1 R1/R2) --------------------------------
+// K-weighted gated loudness of one already-rendered channel (weight 1.0 — the consumer's
+// per-stem convention; positional weights apply only to the whole bed).
+double intentMonoLufs(const std::vector<float>& x, double sampleRate) {
+    meter::AudioBuffer b;
+    b.channels = 1;
+    b.sampleRate = sampleRate;
+    b.frames = x.size();
+    b.samples = x;
+    return intent::clampLufs(meter::gatedLoudness(b, {1.0}).integratedLufs);
+}
+
+// Whole-bed gated loudness over the first `bedCh` planar channel buffers, with the
+// F33-conformant positional weights (bed_weights.h) — the figure bed.expectLufs claims.
+double intentBedLufs(const std::vector<std::vector<float>>& channels, int bedCh, size_t frames,
+                     double sampleRate) {
+    meter::AudioBuffer b;
+    b.channels = bedCh;
+    b.sampleRate = sampleRate;
+    b.frames = frames;
+    b.samples.assign(frames * (size_t)bedCh, 0.0f);
+    for (int c = 0; c < bedCh; ++c) {
+        const std::vector<float>& src = channels[(size_t)c];
+        const size_t nf = std::min(frames, src.size());
+        for (size_t f = 0; f < nf; ++f) b.samples[f * (size_t)bedCh + (size_t)c] = src[f];
+    }
+    return intent::clampLufs(meter::gatedLoudness(b, bedChannelWeights(bedCh)).integratedLufs);
+}
+
+// Fill one roster/object level triple from a rendered channel buffer.
+template <typename T>
+void intentFillLevels(T& e, const std::vector<float>& x, double sampleRate) {
+    e.haveRms = true;    e.rmsDb = intent::rmsDb(x);
+    e.haveLufs = true;   e.lufs = intentMonoLufs(x, sampleRate);
+    e.haveActive = true; e.active = intent::activeFraction(x, (int)std::llround(sampleRate));
+}
 #endif  // REAPER_MCP_HAVE_SDK
 
 }  // namespace
@@ -1207,9 +1263,13 @@ void registerSpatialTools(ToolRegistry& reg) {
     reg.add(Tool{
         "spatial.set_source_position",
         "Position a source in the surround panner. Give x/y in [-1,1] (or azimuthDeg[/elevationDeg]) "
-        "and optional z height; values are written normalized ([0,1], centre 0.5) so any param range "
-        "is safe. Param indices are discovered by name; pass paramX/paramY/paramZ (from "
-        "spatial.get_surround_state) to drive them deterministically.",
+        "and optional z height. Angle-representation panners (IEM/SPARTA-style encoders exposing "
+        "Azimuth/Elevation params) are driven in azimuth/elevation — derived from x/y/z when needed, "
+        "mapped onto each param's own degree range, and partial writes preserve the untouched axis "
+        "(z alone never recenters azimuth). Cartesian panners (ReaSurroundPan) take normalized "
+        "writes ([0,1], centre 0.5) discovered by letter, never matching quaternion params. Pass "
+        "paramX/paramY/paramZ (from spatial.get_surround_state) or normalizedInput to force "
+        "deterministic cartesian writes.",
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "fx":{"type":"integer","minimum":0},"source":{"type":"integer","minimum":0,"default":0},
             "x":{"type":"number"},"y":{"type":"number"},"z":{"type":"number"},
@@ -1226,23 +1286,30 @@ void registerSpatialTools(ToolRegistry& reg) {
             const int idx = reqInt(a, "track");
             const bool normIn = optBool(a, "normalizedInput", false);
 
-            // Resolve axis values in user space [-1,1] (front/right/up positive).
-            bool hasX = a.contains("x") && a["x"].is_number();
-            bool hasY = a.contains("y") && a["y"].is_number();
-            bool hasZ = a.contains("z") && a["z"].is_number();
-            double xu = hasX ? a["x"].get<double>() : 0.0;
-            double yu = hasY ? a["y"].get<double>() : 0.0;
-            double zu = hasZ ? a["z"].get<double>() : 0.0;
-            if (a.contains("azimuthDeg") && a["azimuthDeg"].is_number()) {
-                const double az = a["azimuthDeg"].get<double>() * M_PI / 180.0;
-                double el = 0.0;
-                if (a.contains("elevationDeg") && a["elevationDeg"].is_number())
-                    el = a["elevationDeg"].get<double>() * M_PI / 180.0;
+            // Raw request shape (D3: the angle path composes from the ORIGINAL args — the
+            // cartesian conversion below overwrites the has-flags).
+            const bool azArg = a.contains("azimuthDeg") && a["azimuthDeg"].is_number();
+            const bool elArg = a.contains("elevationDeg") && a["elevationDeg"].is_number();
+            const double azArgDeg = azArg ? a["azimuthDeg"].get<double>() : 0.0;
+            const double elArgDeg = elArg ? a["elevationDeg"].get<double>() : 0.0;
+            const bool rawX = a.contains("x") && a["x"].is_number();
+            const bool rawY = a.contains("y") && a["y"].is_number();
+            const bool rawZ = a.contains("z") && a["z"].is_number();
+
+            // Resolve axis values in user space [-1,1] (front/right/up positive) for the
+            // cartesian write path.
+            bool hasX = rawX, hasY = rawY, hasZ = rawZ;
+            double xu = rawX ? a["x"].get<double>() : 0.0;
+            double yu = rawY ? a["y"].get<double>() : 0.0;
+            double zu = rawZ ? a["z"].get<double>() : 0.0;
+            if (azArg) {
+                const double az = azArgDeg * M_PI / 180.0;
+                const double el = elArg ? elArgDeg * M_PI / 180.0 : 0.0;
                 xu = -std::sin(az) * std::cos(el);  // +az = left (matches the suite convention)
                 yu = std::cos(az) * std::cos(el);   // front
                 zu = std::sin(el);                  // up
                 hasX = hasY = true;
-                if (a.contains("elevationDeg")) hasZ = true;
+                if (elArg) hasZ = true;
             }
             auto toNorm = [normIn](double v) -> double {
                 double n = normIn ? v : (v + 1.0) * 0.5;   // [-1,1] -> [0,1]
@@ -1251,42 +1318,99 @@ void registerSpatialTools(ToolRegistry& reg) {
 
 #ifdef REAPER_MCP_HAVE_SDK
             MediaTrack* t = requireTrack(idx);
-            const int fx = resolveSurroundFx(a, t);
+            // FX resolution: explicit wins; else the surround-name scan; else (D3) the
+            // exporter's positional-fx scan — the tool lands on the same panner
+            // spatial.export_adm samples, so IEM-style encoders no longer need explicit fx.
+            int fx = -1;
+            if (a.contains("fx") && a["fx"].is_number()) {
+                fx = a["fx"].get<int>();
+            } else {
+                fx = findSurroundFx(t);
+                if (fx < 0) fx = findPositionalFx(t).fx;
+                if (fx < 0)
+                    throw std::runtime_error("no ReaSurroundPan-style or azimuth/elevation "
+                                             "panner FX on track; pass 'fx' explicitly");
+            }
             const int np = TrackFX_GetNumParams(t, fx);
             const int source = optInt(a, "source", 0);
 
-            // Discover a param index for an axis: explicit override wins; else match a param whose
-            // name contains the axis letter (and, when source>0, the source number) as a token.
-            auto discover = [&](const char* explicitKey, char axis) -> int {
+            std::vector<std::string> pnames;
+            pnames.reserve((size_t)np);
+            for (int p = 0; p < np; ++p) pnames.push_back(toLower(fxParamNameStr(t, fx, p)));
+            const posparam::Discovery disc = posparam::discover(pnames, source);
+
+            const bool explicitParams =
+                (a.contains("paramX") && a["paramX"].is_number()) ||
+                (a.contains("paramY") && a["paramY"].is_number()) ||
+                (a.contains("paramZ") && a["paramZ"].is_number());
+
+            // ---- D3: angle-representation panner -> drive azimuth/elevation. The
+            //      bare-letter scan used to land on "Quaternion X" — and on "aZimuth Angle"
+            //      for z — on IEM encoders: params the exporter never samples, so a "set"
+            //      succeeded while the exported trajectory never moved. Explicit paramX/Y/Z
+            //      or normalizedInput still forces the cartesian path. ----
+            if (!explicitParams && !normIn && disc.azElFirst()) {
+                double curAzDeg = 0.0;
+                if (rawX != rawY && !azArg)  // exactly one horizontal component given
+                    curAzDeg = readCurAngleDeg(t, fx, disc.azP, "azim");
+                const posparam::TargetAngles tgt = posparam::composeTarget(
+                    azArg, azArgDeg, elArg, elArgDeg,
+                    rawX, rawX ? a["x"].get<double>() : 0.0,
+                    rawY, rawY ? a["y"].get<double>() : 0.0,
+                    rawZ, rawZ ? a["z"].get<double>() : 0.0, curAzDeg);
+                Json set = Json::array();
+                if (tgt.writeAz) {
+                    Json r = setNamedValueParam(t, fx, np, "azim", tgt.azDeg, source + 1);
+                    if (!r.is_null())
+                        set.push_back(Json{{"axis", "azimuth"}, {"param", r["param"]},
+                                           {"normalized", r["value"]},
+                                           {"requestedDeg", tgt.azDeg}});
+                }
+                if (tgt.writeEl) {
+                    Json r = setNamedValueParam(t, fx, np, "elev", tgt.elDeg, source + 1);
+                    if (!r.is_null())
+                        set.push_back(Json{{"axis", "elevation"}, {"param", r["param"]},
+                                           {"normalized", r["value"]},
+                                           {"requestedDeg", tgt.elDeg}});
+                }
+                if (set.empty())
+                    return Json{{"ok", false}, {"fxIndex", fx},
+                                {"representation", "azimuthElevation"},
+                                {"message", "azimuth/elevation panner: nothing to write — give "
+                                            "x/y/z or azimuthDeg/elevationDeg"}};
+                return Json{{"ok", true}, {"fxIndex", fx},
+                            {"representation", "azimuthElevation"}, {"set", std::move(set)},
+                            {"message", "angle-representation panner: drove azimuth/elevation "
+                                        "(pass paramX/paramY/paramZ to force cartesian params)"}};
+            }
+
+            // Cartesian path: explicit override wins; else the classifier's letter scan
+            // (which never matches quaternion components).
+            auto discover = [&](const char* explicitKey, int classified) -> int {
                 if (a.contains(explicitKey) && a[explicitKey].is_number())
                     return a[explicitKey].get<int>();
-                const std::string want(1, axis);
-                const std::string srcTok = std::to_string(source + 1);  // ReaSurroundPan is 1-based
-                int fallback = -1;
-                for (int p = 0; p < np; ++p) {
-                    std::string nm = toLower(fxParamNameStr(t, fx, p));
-                    if (nm.find(want) == std::string::npos) continue;
-                    if (source == 0 && fallback < 0) fallback = p;
-                    if (nm.find(srcTok) != std::string::npos) return p;
-                }
-                return fallback;
+                return classified;
             };
 
             Json set = Json::array();
-            if (hasX) { int p = discover("paramX", 'x');
+            if (hasX) { int p = discover("paramX", disc.xP);
                         if (p >= 0) { double n = toNorm(normIn ? xu : -xu); TrackFX_SetParamNormalized(t, fx, p, n);  // ReaSurroundPan in1X 0=right..1=left (verified 2026-07-10): negate x for the panner (normIn is already panner-normalized)
                                       set.push_back(Json{{"axis","x"},{"param",p},{"normalized",n}}); } }
-            if (hasY) { int p = discover("paramY", 'y');
+            if (hasY) { int p = discover("paramY", disc.yP);
                         if (p >= 0) { double n = toNorm(yu); TrackFX_SetParamNormalized(t, fx, p, n);
                                       set.push_back(Json{{"axis","y"},{"param",p},{"normalized",n}}); } }
-            if (hasZ) { int p = discover("paramZ", 'z');
+            if (hasZ) { int p = discover("paramZ", disc.zP);
                         if (p >= 0) { double n = toNorm(zu); TrackFX_SetParamNormalized(t, fx, p, n);
                                       set.push_back(Json{{"axis","z"},{"param",p},{"normalized",n}}); } }
 
             if (set.empty())
                 return Json{{"ok", false}, {"fxIndex", fx},
-                            {"message", "no position params matched by name; call "
-                                        "spatial.get_surround_state and pass paramX/paramY/paramZ"}};
+                            {"message", disc.skippedQuaternion
+                                 ? "only quaternion-representation position params found; "
+                                   "refusing to half-write a rotation — pass paramX/paramY/"
+                                   "paramZ explicitly or use an azimuth/elevation panner"
+                                 : "no position params matched by name; call "
+                                   "spatial.get_surround_state and pass paramX/paramY/paramZ"}};
             return Json{{"ok", true}, {"fxIndex", fx}, {"set", std::move(set)}};
 #else
             (void)idx;
@@ -3175,7 +3299,10 @@ void registerSpatialTools(ToolRegistry& reg) {
         "(7.1.4/9.1.6/22.2 — route those channels as objects), a non-48k render, or >118 objects / >128 "
         "channels. The applied normalizations are echoed in 'profile'. Validate any ADM BWF's conformance "
         "with analysis.adm_profile_check. (Profile-shaped + self-validated; certified-renderer ingest is "
-        "your check.)",
+        "your check.) intentSidecar:true additionally writes <base>.intent.json beside the export — the "
+        "session's own predictions (schema `intent: 0`: roster + trajectories + decode dominance + "
+        "expect* levels, NEVER a declared loudness) which `sentinel intent-compare` verifies against "
+        "the delivered file (S-340..S-346, the intent-conformance QC loop).",
         jparse(R"({"type":"object","properties":{
             "bedTrack":{"type":"integer","minimum":0},
             "bedLayout":{"type":"string","enum":["5.1","7.1","7.1.2","7.1.4","9.1.6","22.2"],"default":"7.1.2"},
@@ -3199,10 +3326,12 @@ void registerSpatialTools(ToolRegistry& reg) {
             "boundsFlag":{"type":"integer","minimum":0,"maximum":7,"default":1},
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
+            "intentSidecar":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
             "ok":{"type":"boolean"},"dryRun":{"type":"boolean"},"path":{"type":"string"},
+            "intentSidecarPath":{"type":["string","null"]},
             "container":{"type":"string"},"channels":{"type":"integer"},"frames":{"type":"integer"},
             "sampleRate":{"type":"number"},"bitDepth":{"type":"integer"},"durationSec":{"type":"number"},
             "bedLayout":{"type":"string"},"bedChannels":{"type":"integer"},"objectCount":{"type":"integer"},
@@ -3215,6 +3344,7 @@ void registerSpatialTools(ToolRegistry& reg) {
         Profile::Render,
         [](const Json& a) -> Json {
             const bool dryRun = optBool(a, "dryRun", false);
+            const bool wantIntent = optBool(a, "intentSidecar", false);
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.2");
             const std::string coordMode = optStr(a, "coordinateMode", "spherical");
             const adm::Coord coord = (coordMode == "cartesian") ? adm::Coord::Cartesian
@@ -3400,15 +3530,17 @@ void registerSpatialTools(ToolRegistry& reg) {
             }
 
             if (dryRun) {
-                return Json{{"dryRun", true}, {"ok", true}, {"path", outPath},
-                            {"bedLayout", m.bedLayoutName}, {"bedChannels", bedCh},
-                            {"objectCount", (int)m.objects.size()}, {"channels", m.channelCount()},
-                            {"objectMetadataCount", objectMetadataCount},
-                            {"coordinateMode", reportedCoordMode}, {"bitDepth", bitDepth},
-                            {"durationSec", durationSec}, {"objects", objReport}, {"profile", profileJson},
-                            {"warnings", warnings},
-                            {"note", "dryRun: sampled object positions + planned the ADM model; "
-                                     "no render, no file written."}};
+                Json ret{{"dryRun", true}, {"ok", true}, {"path", outPath},
+                         {"bedLayout", m.bedLayoutName}, {"bedChannels", bedCh},
+                         {"objectCount", (int)m.objects.size()}, {"channels", m.channelCount()},
+                         {"objectMetadataCount", objectMetadataCount},
+                         {"coordinateMode", reportedCoordMode}, {"bitDepth", bitDepth},
+                         {"durationSec", durationSec}, {"objects", objReport}, {"profile", profileJson},
+                         {"warnings", warnings},
+                         {"note", "dryRun: sampled object positions + planned the ADM model; "
+                                  "no render, no file written."}};
+                if (wantIntent) ret["intentSidecarPath"] = intent::sidecarPathFor(outPath);
+                return ret;
             }
 
             // --- real render + author ---
@@ -3492,16 +3624,76 @@ void registerSpatialTools(ToolRegistry& reg) {
             os.close();
             if (!os) return makeError("file_write_failed", "error writing the ADM file to " + outPath, "");
 
+            // ---- intent sidecar (B1 R1): the session's own predictions, written
+            // beside the deliverable AFTER it exists. A sidecar write failure is a warning,
+            // never a failed export (honesty over rollback — the deliverable is already real).
+            std::string sidecarPath;
+            if (wantIntent) {
+                intent::Sidecar sc;
+                sc.producerVersion = kInsegletVersion;
+                sc.producerExport = "spatial.export_adm";
+                sc.sampleRate = m.sampleRate;
+                sc.start = 0.0;
+                sc.end = m.durationSec;
+                sc.sliceSec = intent::defaultSliceSec();
+                const std::string scLayout = intent::sidecarBedLayout(m.bedLayoutName);
+                if (bedCh > 0 && !scLayout.empty()) {
+                    sc.haveBed = true;
+                    sc.bedLayout = scLayout;
+                    sc.haveBedLufs = true;
+                    sc.bedLufs = intentBedLufs(channels, bedCh, frames, sampleRate);
+                    for (int c = 0; c < bedCh && c < (int)m.bed.size(); ++c) {
+                        intent::RosterEntry r;
+                        r.channel = m.bed[(size_t)c].speakerLabel;
+                        r.track = c + 1;
+                        intentFillLevels(r, channels[(size_t)c], sampleRate);
+                        sc.roster.push_back(std::move(r));
+                    }
+                } else if (bedCh > 0) {
+                    warnings.push_back("intentSidecar: bed layout " + m.bedLayoutName +
+                                       " is outside intent-compare v0's judged set (5.1/7.1/"
+                                       "7.1.4) — no bed claims emitted (absent block = absent "
+                                       "claim).");
+                }
+                const std::string decLayout = sc.haveBed ? sc.bedLayout : std::string("7.1.4");
+                for (size_t j = 0; j < m.objects.size(); ++j) {
+                    const adm::Object& o = m.objects[j];
+                    intent::ObjectEntry e;
+                    e.id = o.objectNumber;
+                    e.label = o.name;
+                    e.track = bedCh + (int)j + 1;
+                    e.trajectory = intent::trajectoryFromBlocks(o.blocks, m.durationSec);
+                    e.decodeLayout = decLayout;
+                    e.haveDecode = intent::computeDecode(e, sc.start, sc.end, sc.sliceSec);
+                    const size_t chIdx = (size_t)bedCh + j;
+                    if (chIdx < channels.size())
+                        intentFillLevels(e, channels[chIdx], sampleRate);
+                    sc.objects.push_back(std::move(e));
+                }
+                const std::string txt = intent::writeSidecarJson(sc);
+                sidecarPath = intent::sidecarPathFor(outPath);
+                std::ofstream so(sidecarPath, std::ios::binary | std::ios::trunc);
+                if (so) { so.write(txt.data(), (std::streamsize)txt.size()); so.close(); }
+                if (!so) {
+                    warnings.push_back("intentSidecar: could not write " + sidecarPath +
+                                       " — the export itself succeeded.");
+                    sidecarPath.clear();
+                }
+            }
+
             adm::ParseResult pr = adm::parseAdmImage(wr.bytes);
-            return Json{{"ok", true}, {"dryRun", false}, {"path", outPath},
-                        {"container", wr.bw64 ? "BW64" : "RIFF/WAVE"}, {"channels", wr.channels},
-                        {"frames", (double)frames}, {"sampleRate", sampleRate}, {"bitDepth", bitDepth},
-                        {"durationSec", m.durationSec}, {"bedLayout", m.bedLayoutName},
-                        {"bedChannels", bedCh}, {"objectCount", (int)m.objects.size()},
-                        {"objectMetadataCount", objectMetadataCount},
-                        {"coordinateMode", reportedCoordMode}, {"objects", objReport},
-                        {"profile", profileJson},
-                        {"adm", pr.ok ? pr.summary : Json(nullptr)}, {"warnings", warnings}};
+            Json ret{{"ok", true}, {"dryRun", false}, {"path", outPath},
+                     {"container", wr.bw64 ? "BW64" : "RIFF/WAVE"}, {"channels", wr.channels},
+                     {"frames", (double)frames}, {"sampleRate", sampleRate}, {"bitDepth", bitDepth},
+                     {"durationSec", m.durationSec}, {"bedLayout", m.bedLayoutName},
+                     {"bedChannels", bedCh}, {"objectCount", (int)m.objects.size()},
+                     {"objectMetadataCount", objectMetadataCount},
+                     {"coordinateMode", reportedCoordMode}, {"objects", objReport},
+                     {"profile", profileJson},
+                     {"adm", pr.ok ? pr.summary : Json(nullptr)}, {"warnings", warnings}};
+            if (wantIntent)
+                ret["intentSidecarPath"] = sidecarPath.empty() ? Json(nullptr) : Json(sidecarPath);
+            return ret;
 #else
             (void)coord; (void)blockMs; (void)maxBlocks; (void)boundsFlag; (void)bitDepth;
             Json objReport = Json::array();
@@ -3520,14 +3712,18 @@ void registerSpatialTools(ToolRegistry& reg) {
                 profileJson = Json{{"profile", "dolby-atmos"}, {"conformant", true},
                                    {"violations", Json::array()}, {"normalized", Json::array()},
                                    {"note", "host build: profile plan (no REAPER render)"}};
-            return Json{{"dryRun", dryRun}, {"ok", true}, {"path", optStr(a, "outPath", "REAPER_MCP_ADM.wav")},
-                        {"bedLayout", bedLayout}, {"bedChannels", bedCh},
-                        {"objectCount", (int)objTracks.size()}, {"channels", bedCh + (int)objTracks.size()},
-                        {"objectMetadataCount", objectMetadataCount},
-                        {"coordinateMode", wantProfile ? std::string("cartesian") : coordMode},
-                        {"bitDepth", bitDepth}, {"durationSec", 0.0},
-                        {"objects", objReport}, {"profile", profileJson}, {"warnings", Json::array()},
-                        {"note", "host build: representative plan (no REAPER render)"}};
+            Json ret{{"dryRun", dryRun}, {"ok", true}, {"path", optStr(a, "outPath", "REAPER_MCP_ADM.wav")},
+                     {"bedLayout", bedLayout}, {"bedChannels", bedCh},
+                     {"objectCount", (int)objTracks.size()}, {"channels", bedCh + (int)objTracks.size()},
+                     {"objectMetadataCount", objectMetadataCount},
+                     {"coordinateMode", wantProfile ? std::string("cartesian") : coordMode},
+                     {"bitDepth", bitDepth}, {"durationSec", 0.0},
+                     {"objects", objReport}, {"profile", profileJson}, {"warnings", Json::array()},
+                     {"note", "host build: representative plan (no REAPER render)"}};
+            if (wantIntent)
+                ret["intentSidecarPath"] =
+                    intent::sidecarPathFor(optStr(a, "outPath", "REAPER_MCP_ADM.wav"));
+            return ret;
 #endif
         }});
 
@@ -3871,7 +4067,11 @@ void registerSpatialTools(ToolRegistry& reg) {
         "off-iamf or non-flac / M-402, normalize with lpcm / M-402, non-48k renders / M-308). Stems "
         "render bit-exact (RENDER_* snapshot/restore, temps deleted); bound long programmes with "
         "boundsFlag=0 + startPos/endPos (a render blocks the main thread). dryRun (DEFAULT false) "
-        "plans sources + targets and returns the manifest YAML WITHOUT rendering or writing.",
+        "plans sources + targets and returns the manifest YAML WITHOUT rendering or writing. "
+        "intentSidecar:true additionally writes manifest.intent.json beside the manifest — the "
+        "session's own predictions for the bed/scene stems (schema `intent: 0`: roster + expect* "
+        "levels + per-ACN scene RMS, NEVER a declared loudness — Loom still measures) for "
+        "`sentinel intent-compare` once the deliverable exists (VO stems carry no claims in v0).",
         jparse(R"({"type":"object","properties":{
             "bedTrack":{"type":"integer","minimum":0},
             "bedLayout":{"type":"string","enum":["stereo","5.1","7.1.4"],"default":"7.1.4"},
@@ -3898,10 +4098,12 @@ void registerSpatialTools(ToolRegistry& reg) {
             "boundsFlag":{"type":"integer","minimum":0,"maximum":7,"default":1},
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
+            "intentSidecar":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
             "ok":{"type":"boolean"},"dryRun":{"type":"boolean"},"path":{"type":"string"},
+            "intentSidecarPath":{"type":["string","null"]},
             "seasonPath":{"type":"string"},"outDir":{"type":"string"},"title":{"type":"string"},
             "manifestYaml":{"type":"string"},"sources":{"type":"array"},"targets":{"type":"array"},
             "wavs":{"type":"array"},"channels":{"type":"integer"},"sampleRate":{"type":"number"},
@@ -3914,6 +4116,7 @@ void registerSpatialTools(ToolRegistry& reg) {
         [](const Json& a) -> Json {
             namespace lb = loomb;
             const bool dryRun = optBool(a, "dryRun", false);
+            const bool wantIntent = optBool(a, "intentSidecar", false);
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.4");
             int bitDepth = optInt(a, "bitDepth", 24);
             if (bitDepth != 16 && bitDepth != 24) bitDepth = 24;
@@ -4154,13 +4357,15 @@ void registerSpatialTools(ToolRegistry& reg) {
             }
 
             if (dryRun) {
-                return Json{{"dryRun", true}, {"ok", true}, {"path", manifestPath},
-                            {"seasonPath", seasonPath.empty() ? Json(nullptr) : Json(seasonPath)},
-                            {"outDir", outDir}, {"title", title}, {"manifestYaml", manifestYaml},
-                            {"sources", sourcesJ}, {"targets", targetsJ}, {"bitDepth", bitDepth},
-                            {"next", next}, {"warnings", warnings},
-                            {"note", "dryRun: planned sources + targets and composed the manifest; "
-                                     "no render, no files written."}};
+                Json ret{{"dryRun", true}, {"ok", true}, {"path", manifestPath},
+                         {"seasonPath", seasonPath.empty() ? Json(nullptr) : Json(seasonPath)},
+                         {"outDir", outDir}, {"title", title}, {"manifestYaml", manifestYaml},
+                         {"sources", sourcesJ}, {"targets", targetsJ}, {"bitDepth", bitDepth},
+                         {"next", next}, {"warnings", warnings},
+                         {"note", "dryRun: planned sources + targets and composed the manifest; "
+                                  "no render, no files written."}};
+                if (wantIntent) ret["intentSidecarPath"] = outDir + "/manifest.intent.json";
+                return ret;
             }
 
             // ---- render + write ----
@@ -4263,16 +4468,80 @@ void registerSpatialTools(ToolRegistry& reg) {
                 if (!os) return makeError("file_write_failed", "error writing " + seasonPath, "");
             }
 
+            // ---- intent sidecar (B1 R2): predictions for the bed/scene stems this
+            // call just rendered; VO stems carry no claims in v0 (absent block = absent claim).
+            // A sidecar write failure is a warning, never a failed export.
+            std::string sidecarPath;
+            if (wantIntent) {
+                intent::Sidecar sc;
+                sc.producerVersion = kInsegletVersion;
+                sc.producerExport = "spatial.export_loom_manifest";
+                sc.sampleRate = (int)std::llround(sampleRate);
+                sc.start = 0.0;
+                sc.end = (double)frames / sampleRate;
+                sc.sliceSec = intent::defaultSliceSec();
+                const StemOut* bedStem = nullptr;
+                const StemOut* sceneStem = nullptr;
+                for (const auto& s : stems) {
+                    if (s.name == "main") bedStem = &s;
+                    else if (s.name == "scene") sceneStem = &s;
+                }
+                if (bedStem) {
+                    const std::string scLayout = intent::sidecarBedLayout(bedLayout);
+                    const intent::IntentLayout* lay =
+                        scLayout.empty() ? nullptr : intent::findIntentLayout(scLayout);
+                    if (lay && (int)lay->speakers.size() == (int)bedStem->ch.size()) {
+                        sc.haveBed = true;
+                        sc.bedLayout = scLayout;
+                        sc.haveBedLufs = true;
+                        sc.bedLufs = intentBedLufs(bedStem->ch, (int)bedStem->ch.size(),
+                                                   frames, sampleRate);
+                        for (size_t c = 0; c < bedStem->ch.size(); ++c) {
+                            intent::RosterEntry r;
+                            r.channel = lay->speakers[c].label;
+                            r.track = (int)c + 1;
+                            intentFillLevels(r, bedStem->ch[c], sampleRate);
+                            sc.roster.push_back(std::move(r));
+                        }
+                    } else {
+                        warnings.push_back("intentSidecar: bed layout " + bedLayout +
+                                           " is outside intent-compare v0's judged set — no "
+                                           "bed claims emitted (absent block = absent claim).");
+                    }
+                }
+                if (sceneStem && !sceneStem->ch.empty()) {
+                    sc.haveScene = true;
+                    sc.scene.order = sceneOrder;
+                    for (const auto& acn : sceneStem->ch)
+                        sc.scene.rmsDb.push_back(intent::rmsDb(acn));
+                }
+                if (!languages.empty())
+                    warnings.push_back("intentSidecar: VO stems carry no intent claims in v0 "
+                                       "(absent block = absent claim).");
+                const std::string txt = intent::writeSidecarJson(sc);
+                sidecarPath = outDir + "/manifest.intent.json";
+                std::ofstream so(sidecarPath, std::ios::binary | std::ios::trunc);
+                if (so) { so.write(txt.data(), (std::streamsize)txt.size()); so.close(); }
+                if (!so) {
+                    warnings.push_back("intentSidecar: could not write " + sidecarPath +
+                                       " — the export itself succeeded.");
+                    sidecarPath.clear();
+                }
+            }
+
             int totalCh = 0;
             for (const auto& s : stems) totalCh += (int)s.ch.size();
-            return Json{{"ok", true}, {"dryRun", false}, {"path", manifestPath},
-                        {"seasonPath", seasonPath.empty() ? Json(nullptr) : Json(seasonPath)},
-                        {"outDir", outDir}, {"title", title}, {"manifestYaml", manifestYaml},
-                        {"sources", sourcesJ}, {"targets", targetsJ}, {"wavs", wavsJ},
-                        {"channels", totalCh}, {"sampleRate", sampleRate},
-                        {"frames", (double)frames}, {"bitDepth", bitDepth},
-                        {"durationSec", (double)frames / sampleRate}, {"next", next},
-                        {"warnings", warnings}};
+            Json ret{{"ok", true}, {"dryRun", false}, {"path", manifestPath},
+                     {"seasonPath", seasonPath.empty() ? Json(nullptr) : Json(seasonPath)},
+                     {"outDir", outDir}, {"title", title}, {"manifestYaml", manifestYaml},
+                     {"sources", sourcesJ}, {"targets", targetsJ}, {"wavs", wavsJ},
+                     {"channels", totalCh}, {"sampleRate", sampleRate},
+                     {"frames", (double)frames}, {"bitDepth", bitDepth},
+                     {"durationSec", (double)frames / sampleRate}, {"next", next},
+                     {"warnings", warnings}};
+            if (wantIntent)
+                ret["intentSidecarPath"] = sidecarPath.empty() ? Json(nullptr) : Json(sidecarPath);
+            return ret;
 #else
             (void)boundsFlag;
             // Host build: representative plan over the same SDK-free emitter (no REAPER render).
@@ -4309,13 +4578,15 @@ void registerSpatialTools(ToolRegistry& reg) {
                 targetsJ.push_back(Json{{"format", t.format}, {"out", t.out}});
             const std::string outDir = optStr(a, "outDir", "loom_export");
             const std::string manifestPath = outDir + "/manifest.yaml";
-            return Json{{"dryRun", dryRun}, {"ok", true}, {"path", manifestPath},
-                        {"seasonPath", episodes.empty() ? Json(nullptr) : Json(outDir + "/season.yaml")},
-                        {"outDir", outDir}, {"title", title},
-                        {"manifestYaml", lb::writeManifestYaml(model)},
-                        {"sources", sourcesJ}, {"targets", targetsJ}, {"bitDepth", bitDepth},
-                        {"next", "loom compile " + manifestPath}, {"warnings", warnings},
-                        {"note", "host build: representative plan (no REAPER render)"}};
+            Json ret{{"dryRun", dryRun}, {"ok", true}, {"path", manifestPath},
+                     {"seasonPath", episodes.empty() ? Json(nullptr) : Json(outDir + "/season.yaml")},
+                     {"outDir", outDir}, {"title", title},
+                     {"manifestYaml", lb::writeManifestYaml(model)},
+                     {"sources", sourcesJ}, {"targets", targetsJ}, {"bitDepth", bitDepth},
+                     {"next", "loom compile " + manifestPath}, {"warnings", warnings},
+                     {"note", "host build: representative plan (no REAPER render)"}};
+            if (wantIntent) ret["intentSidecarPath"] = outDir + "/manifest.intent.json";
+            return ret;
 #endif
         }});
 

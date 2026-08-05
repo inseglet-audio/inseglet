@@ -10,7 +10,8 @@
 
   Per release (see the release runbook): prepend a new <version> block, set its release-asset
   URL + time, and keep the version string in sync with the git tag, CMakeLists project(VERSION),
-  src/mcp_server.cpp kServerVersion, and the src/reaper_mcp.cpp discovery.
+  and src/inseglet_version.h — the one in-source constant (it feeds serverInfo, the discovery
+  file, and the intent sidecar's producer stamp).
 
   v1 is macOS-only. Uncomment the [windows]/[linux] <source> lines only AFTER the extension is
   load-verified in a real REAPER on that OS.
@@ -18,6 +19,24 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.7.0" author="James Livingston" time="2026-08-05T00:00:00Z">
+        <changelog><![CDATA[B1 intent sidecar (authoring side) + representation-aware positioning.
+No surface-count change (187 tools / 3 resources / 4 prompts).
+intentSidecar: true on spatial.export_adm and spatial.export_loom_manifest writes the
+session's own predictions beside the export (<base>.intent.json / manifest.intent.json,
+schema intent: 0): per-channel bed level claims (BS.1770-4-conformant whole-bed weights),
+object trajectories at block reach times, SN3D projection-decode dominance/coverage
+predictions, per-ACN scene RMS. Never a declared deliverable loudness — every level is an
+expect* claim for the open iamf-sentinel-pro consumer (sentinel intent-compare, S-340..S-346).
+Silent-channel claims floor at the BS.1770 silence convention (-70 LKFS), verified through a
+live REAPER -> export -> consumer gate.
+spatial.set_source_position now drives azimuth/elevation on angle-representation panners
+(IEM/SPARTA-style encoders) instead of bare-letter param matching, which could land on
+Quaternion X — or read "aZimuth" as z — and move params the ADM exporter never samples;
+ReaSurroundPan-style cartesian writes are unchanged, and auto-detect finds angle panners
+without an explicit fx index.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.7.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.6.0" author="James Livingston" time="2026-08-04T00:00:00Z">
         <changelog><![CDATA[IAMF delivery: the Loom bridge + cross-ecosystem docs
 (187 tools / 3 resources / 4 prompts; includes the 1.5.1 correctness patch).

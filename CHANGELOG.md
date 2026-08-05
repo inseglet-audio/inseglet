@@ -6,6 +6,47 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.7.0] — 2026-08-05
+
+Feature release: the authoring-side intent sidecar + representation-aware positioning.
+No surface-count change (**187 tools / 3 resources / 4 prompts**).
+
+### Added
+- **Intent sidecar emission** — `intentSidecar: true` on `spatial.export_adm` and
+  `spatial.export_loom_manifest` writes the session's own predictions beside the export
+  (`<base>.intent.json` / `manifest.intent.json`, schema `intent: 0`): a bed roster with
+  measured per-channel `expect*` levels (the whole-bed figure under the BS.1770-4-conformant
+  weights), object trajectories at block reach times, SN3D projection-decode
+  dominance/coverage predictions (order 3), and per-ACN scene RMS. Never a declared
+  deliverable loudness — every level is an `expect*` claim to be *checked*, not copied; the
+  consumer is [iamf-sentinel-pro](https://github.com/jlivingston-Cipher/iamf-sentinel-pro)'s
+  `sentinel intent-compare` (findings S-340…S-346). Beds outside the consumer's judged set
+  (2.0/5.1/7.1/7.1.4) and v0 VO stems emit no claims (absent block = absent claim). Emitted
+  `expectLufs` claims floor at −70 LKFS (the BS.1770 absolute-gate silence convention) so
+  silent bed channels round-trip clean while added content is still caught — verified end to
+  end through a live REAPER → export → consumer gate. Sidecar write failure is a warning,
+  never a failed export. New SDK-free `src/intent_sidecar.h`, pinned by the
+  `unit.intent_sidecar` suite (byte-goldens held cross-platform).
+- **One in-source version constant** — `src/inseglet_version.h` now feeds
+  `serverInfo.version`, the discovery file, and the sidecar's producer stamp, so the
+  version-drift class (a hardcoded string nobody bumped) can no longer recur one literal at
+  a time.
+
+### Fixed
+- **`spatial.set_source_position` drives the representation the exporter reads** —
+  angle-representation panners (IEM/SPARTA-style encoders exposing Azimuth/Elevation
+  params) are now driven in azimuth/elevation, derived from a cartesian request when needed
+  via each param's own degree range; partial writes preserve the untouched axis (z alone
+  never recenters azimuth; a single horizontal component composes against the current
+  azimuth). Previously the bare-letter name scan could land on `Quaternion X` for x — and
+  on `aZimuth Angle` for z, so a height write silently rewrote azimuth — moving params
+  `spatial.export_adm`'s trajectory sampling never reads. The cartesian path
+  (ReaSurroundPan) is unchanged (regression-pinned against the old scan) and now refuses
+  quaternion params with an explanatory message; auto-detect finds angle panners without an
+  explicit `fx` index; explicit `paramX/paramY/paramZ` or `normalizedInput` still forces
+  deterministic cartesian writes. New SDK-free `src/position_params.h` +
+  `unit.position_params` (the negative control reproduces the old defect in-test).
+
 ## [1.6.0] — 2026-08-04
 
 Feature release: IAMF delivery. Surface **186 → 187 tools**; expert prompts **3 → 4**.

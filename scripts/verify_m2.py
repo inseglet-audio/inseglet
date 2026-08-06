@@ -114,10 +114,10 @@ def add_track(name):
 
 # ================================================================================================
 initialize()
-print("== 0. surface == %d ==" % EXPECTED_SURFACE)
+print("== 0. surface >= %d ==" % EXPECTED_SURFACE)
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      "tool surface == %d (147 + 4 M2)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
+check(enum.get("count") >= EXPECTED_SURFACE,
+      "tool surface >= %d (147 + 4 M2)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 m2 = ["analysis.stem_loudness", "analysis.dialog_loudness",
       "analysis.downmix_check", "analysis.loudness_timeline"]

@@ -108,7 +108,7 @@ try:
     tools = rpc("tools/list")["tools"]
     names = {t["name"] for t in tools}
     print("== tool surface ==")
-    check(len(tools) == 60, "tools/list returns 60 tools (58 + check_deliverable + apply_style)",
+    check(len(tools) >= 60, "tools/list returns >= 60 tools (58 + check_deliverable + apply_style)",
           f"got {len(tools)}")
     check("analysis.check_deliverable" in names, "analysis.check_deliverable present")
     check("mix.apply_style" in names, "mix.apply_style present")

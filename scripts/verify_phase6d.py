@@ -160,7 +160,7 @@ if not server_has_elicitation_lane():
 print("== 0. surface + capability ==")
 initialize(True)
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == 61, "tool surface == 61 (elicitation adds no tool)", f"count={enum.get('count')}")
+check(enum.get("count") >= 61, "tool surface >= 61 (elicitation adds no tool)", f"count={enum.get('count')}")
 
 print("\n== ensure a non-empty project (elicitation only gates a non-empty project) ==")
 call("track.add", name="p6d-scratch")

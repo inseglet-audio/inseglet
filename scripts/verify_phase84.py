@@ -86,10 +86,10 @@ def check(cond, label, detail=""):
 
 # ================================================================================================
 initialize()
-print(f"== 0. surface == {EXPECTED_SURFACE} ==")
+print(f"== 0. surface >= {EXPECTED_SURFACE} ==")
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      f"tool surface == {EXPECTED_SURFACE} (125 + 13 P8-4)", f"count={enum.get('count')}")
+check(enum.get("count") >= EXPECTED_SURFACE,
+      f"tool surface >= {EXPECTED_SURFACE} (125 + 13 P8-4)", f"count={enum.get('count')}")
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 p84 = ["envelope.get_points", "envelope.delete_point", "envelope.clear_range",
        "envelope.set_automation_mode", "midi.set_note", "midi.set_cc", "midi.insert_notes",

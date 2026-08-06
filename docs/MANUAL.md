@@ -1,6 +1,6 @@
 % Inseglet — User Manual
 % A native REAPER extension exposing a Model Context Protocol interface
-% Version 1.6.0 · 2026
+% Version 1.8.0 · 2026
 
 ---
 
@@ -20,7 +20,7 @@ every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from 
 
 ## 1. Overview
 
-Inseglet exposes **187 tools**, plus MCP **resources** (live project state you can read and subscribe
+Inseglet exposes **190 tools**, plus MCP **resources** (live project state you can read and subscribe
 to) and expert **prompts**, over a local HTTP endpoint that speaks the MCP `2025-06-18` protocol. The
 tools span everyday DAW work and a deep immersive/spatial layer:
 
@@ -182,17 +182,17 @@ known modal or fatal actions can't be triggered blindly (see `SECURITY.md` and t
 ## 7. What Inseglet can do (tool catalog)
 
 The full, machine-generated reference — every parameter and output schema — is in **`docs/REFERENCE.md`**.
-The summary below orients you by area. Counts are for the v1.6.0 surface (187 tools total).
+The summary below orients you by area. Counts are for the current surface (190 tools total).
 
 | Area (profile) | Tools | What's in it |
 |---|---|---|
 | **Core** (`core`) | 82 | Transport (play/stop/record/goto, repeat, play-rate, metronome), project summary, tracks (add/remove/select/name/fader/mute/solo/color/channels), items (add/split/glue/move/duplicate/fades), takes & comping (add/delete/crop, per-take volume/pan/pitch/play-rate, implode-to-takes), markers & regions, tempo & time-signature map, time selection, track state-chunk read/patch/write, freeze/unfreeze, peak metering, and the always-on `tools.enumerate`. |
-| **Spatial / immersive** (`spatial`) | 23 | Channel beds 5.1 → 22.2, ambisonic encode/decode (ACN/SN3D, order conversion, format conversion), scene rotation & mirroring, beamforming, source distance/room, surround panners, one-call immersive/Atmos session scaffolding, object/bed authoring, idempotent object send-layout orchestration into the external Dolby Atmos Renderer, binaural monitoring, live OSC head-tracking, and native ADM export + inspection. |
-| **Mixing** (`mixing`) | 27 | Track & take FX (list/add/remove/enable/preset, parameter get/set), automation envelopes (points, ranges, automation mode), faders, master FX, and immersive-aware style chains with a bundled multichannel true-peak limiter. |
+| **Spatial / immersive** (`spatial`) | 24 | Channel beds 5.1 → 22.2, ambisonic encode/decode (ACN/SN3D, order conversion, format conversion), scene rotation & mirroring, beamforming, source distance/room, surround panners, one-call immersive/Atmos session scaffolding, object/bed authoring, idempotent object send-layout orchestration into the external Dolby Atmos Renderer, binaural monitoring, live OSC head-tracking, native ADM export + inspection, and B4 channel-identity tone injection (`spatial.inject_identity_tones`). |
+| **Mixing** (`mixing`) | 28 | Track & take FX (list/add/remove/enable/preset, parameter get/set), automation envelopes (points, ranges, automation mode), FX-parameter envelope creation (`envelope.ensure_fx_envelope`), faders, master FX, and immersive-aware style chains with a bundled multichannel true-peak limiter. |
 | **Routing** (`routing`) | 8 | Track-to-track sends and receives (add/list/remove/set level & channels) and channel-count management. |
 | **MIDI** (`midi`) | 23 | Takes plus MIDI note and CC create/read/update/delete, batch note insert, selection filters, and groove/quantization — quantize (grid + swing), humanize, groove-template extract & apply, transpose, velocity scaling, legato, nudge, and time-stretch. |
 | **Render** (`render`) | 5 | Multichannel / immersive deliverable rendering, native ADM BWF and Dolby Atmos Master File (DAMF) triad master authoring, plus the IAMF delivery bridge (`spatial.export_loom_manifest` — Loom-order stems + a ready-to-compile `iamf-loom` manifest). |
-| **Analysis** (`analysis`) | 18 | Gated loudness (program, stem, dialog, per-object), true-peak, ambisonic spatial-field analysis, downmix & binaural QC, decode coverage, loudness timelines, named deliverable-spec conformance, ADM inspection / profile conformance checking, DAMF (Dolby Atmos Master File) triad inspection, renderer-bus send-layout inspection (roster QC), and render-free direct sample reads / accessor metering / frame-accurate silence detection via a REAPER audio accessor, and per-object decode-coverage timelines that track how each immersive object migrates across the delivery loudspeakers over time. |
+| **Analysis** (`analysis`) | 19 | Gated loudness (program, stem, dialog, per-object), true-peak, ambisonic spatial-field analysis, downmix & binaural QC, decode coverage, loudness timelines, named deliverable-spec conformance, ADM inspection / profile conformance checking, DAMF (Dolby Atmos Master File) triad inspection, renderer-bus send-layout inspection (roster QC), and render-free direct sample reads / accessor metering / frame-accurate silence detection via a REAPER audio accessor, and per-object decode-coverage timelines that track how each immersive object migrates across the delivery loudspeakers over time, and B4 routing verification (`analysis.verify_routing`) — which identifier tone actually arrived on each channel, with a measured margin. |
 | **Composite / DSL** (`full`) | 1 | `session.run_dsl` — a deterministic composite macro-DSL with `$ref`/capture and atomic single-undo, for multi-step operations. |
 
 Use `tools.enumerate` (or `tools/list`) at runtime to get the authoritative, current list from your

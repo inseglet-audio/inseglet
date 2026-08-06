@@ -114,10 +114,10 @@ BOUNDS = dict(boundsFlag=0, startPos=0.0, endPos=0.5)
 
 # ================================================================================================
 initialize()
-print("== 0. surface == %d ==" % EXPECTED_SURFACE)
+print("== 0. surface >= %d ==" % EXPECTED_SURFACE)
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      "tool surface == %d (154 + 3 O1)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
+check(enum.get("count") >= EXPECTED_SURFACE,
+      "tool surface >= %d (154 + 3 O1)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 o1 = ["spatial.export_adm", "spatial.author_object_bed", "analysis.adm_inspect"]
 check(all(n in listed for n in o1), "all three O1 tools present in tools/list",

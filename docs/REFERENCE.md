@@ -1,9 +1,9 @@
 # REAPER MCP — Tool, Resource & Prompt Reference
 
-> **Generated** 2026-08-04 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
+> **Generated** 2026-08-05 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
 
 
-**Protocol:** MCP `2025-06-18` · **Surface:** 187 tools · 3 resources · 4 prompts.
+**Protocol:** MCP `2025-06-18` · **Surface:** 190 tools · 3 resources · 5 prompts.
 
 
 Tools are grouped by capability **profile**. Clients may negotiate a bounded profile set at `initialize` (to stay under LLM tool-count caps); `Profile::Full` (the default) exposes every tool. The always-on `tools.enumerate` meta-tool is visible under any profile.
@@ -13,14 +13,14 @@ Tools are grouped by capability **profile**. Clients may negotiate a bounded pro
 | Profile | Tools | Scope |
 | --- | --- | --- |
 | **Core** (`core`) | 82 | Transport, project, tracks, markers, items, tempo, time selection, and the always-on `tools.enumerate` meta-tool. |
-| **Spatial / immersive** (`spatial`) | 23 | Immersive/spatial audio: channel beds, ambisonic encode/decode, surround panners, scene rotation, binaural monitoring, and live head-tracking. |
-| **Mixing** (`mixing`) | 27 | Track FX, parameter automation envelopes, faders, and immersive-aware style chains. |
+| **Spatial / immersive** (`spatial`) | 24 | Immersive/spatial audio: channel beds, ambisonic encode/decode, surround panners, scene rotation, binaural monitoring, and live head-tracking. |
+| **Mixing** (`mixing`) | 28 | Track FX, parameter automation envelopes, faders, and immersive-aware style chains. |
 | **Routing** (`routing`) | 8 | Track-to-track sends and channel-count management. |
 | **MIDI** (`midi`) | 23 | Takes and MIDI note / CC CRUD. |
 | **Render** (`render`) | 5 | Multichannel / immersive deliverable rendering. |
-| **Analysis** (`analysis`) | 18 | Deliverable-spec conformance (loudness + true-peak, per-bed). |
+| **Analysis** (`analysis`) | 19 | Deliverable-spec conformance (loudness + true-peak, per-bed). |
 | **Composite / DSL** (`full`) | 1 | The deterministic composite macro-DSL runner (`$ref`/capture, atomic single-undo). |
-| **Total** | **187** | |
+| **Total** | **190** | |
 
 ## Contents
 
@@ -6871,6 +6871,209 @@ Returns a structured object with: `fxIndex`, `name`, `numChannels`, `numSpeakers
 ```
 </details>
 
+#### `spatial.inject_identity_tones`
+
+**Profile:** `spatial` · **Hints:** mutating
+
+Lay a unique identifier sine on every channel (or every listed track) so any downstream routing fault is measurable, then verify it with analysis.verify_routing. This is the iamf-adm-corpus's spectral-identity method brought into the session: slot k carries 313 + 139*k Hz (LFE slots carry 40 Hz), -18 dBFS, 2 s at 48 kHz by default — non-harmonic tones with no shared partials, so a swap, a drop, a duplicate or a few dB of bleed each leave a distinct signature. mode=channels writes ONE multichannel WAV and places it on `track` (verifies bed channel order); mode=tracks writes one MONO WAV per entry in `tracks` (verifies per-object send routing — the routing you cannot see from the mixer). Pass bedLayout to fill channels + LFE indices + speaker labels from the standard bed table, or give channels/lfeChannels/labels directly. The response echoes `lfeChannels` and `channels` — hand them straight to analysis.verify_routing so both halves judge the SAME plan. place:false (or a host build without the placement API) writes the WAVs and reports placed:false with their paths rather than pretending to have placed them; dryRun:true returns the plan and writes nothing. Tone material is deterministic (phase 0, no dither), so re-running produces byte-identical WAVs. NB this authors QC material, not programme material — remove or mute the items before rendering a deliverable.
+
+**Parameters**
+
+| Param | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `bedLayout` | enum | no | one of: `5.1`, `7.1`, `7.1.2`, `7.1.4`, `9.1.6`, `22.2` |
+| `bitDepth` | enum | no | one of: `16`, `24`; default `24` |
+| `channels` | integer | no | range [1, 128] |
+| `dryRun` | boolean | no | default `false` |
+| `durationSec` | number | no | default `2.0`; min 0.1 |
+| `labels` | array&lt;string&gt; | no | — |
+| `levelDb` | number | no | default `-18.0` |
+| `lfeChannels` | array&lt;integer&gt; | no | — |
+| `mode` | enum | no | one of: `channels`, `tracks`; default `"channels"` |
+| `outDir` | string | no | — |
+| `place` | boolean | no | default `true` |
+| `position` | number | no | default `0`; min 0 |
+| `sampleRate` | integer | no | default `48000`; min 8000 |
+| `track` | integer | no | min 0 |
+| `tracks` | array&lt;integer&gt; | no | — |
+
+_Additional properties: not allowed._
+
+**Returns**
+
+Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `items`, `levelDb`, `lfeChannels`, `mode`, `next`, `note`, `ok`, `outDir`, `placed`, `plan`, `remediation`, `sampleRate`, `warnings`, `wavs`.
+
+<details><summary>Full JSON schema</summary>
+
+```json
+{
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "bedLayout": {
+        "enum": [
+          "5.1",
+          "7.1",
+          "7.1.2",
+          "7.1.4",
+          "9.1.6",
+          "22.2"
+        ],
+        "type": "string"
+      },
+      "bitDepth": {
+        "default": 24,
+        "enum": [
+          16,
+          24
+        ],
+        "type": "integer"
+      },
+      "channels": {
+        "maximum": 128,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "dryRun": {
+        "default": false,
+        "type": "boolean"
+      },
+      "durationSec": {
+        "default": 2.0,
+        "minimum": 0.1,
+        "type": "number"
+      },
+      "labels": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "levelDb": {
+        "default": -18.0,
+        "type": "number"
+      },
+      "lfeChannels": {
+        "items": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "mode": {
+        "default": "channels",
+        "enum": [
+          "channels",
+          "tracks"
+        ],
+        "type": "string"
+      },
+      "outDir": {
+        "type": "string"
+      },
+      "place": {
+        "default": true,
+        "type": "boolean"
+      },
+      "position": {
+        "default": 0,
+        "minimum": 0,
+        "type": "number"
+      },
+      "sampleRate": {
+        "default": 48000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "track": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "tracks": {
+        "items": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "outputSchema": {
+    "properties": {
+      "bitDepth": {
+        "type": "integer"
+      },
+      "channels": {
+        "type": "integer"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "dryRun": {
+        "type": "boolean"
+      },
+      "durationSec": {
+        "type": "number"
+      },
+      "error": {
+        "type": "string"
+      },
+      "frames": {
+        "type": "integer"
+      },
+      "items": {
+        "type": "array"
+      },
+      "levelDb": {
+        "type": "number"
+      },
+      "lfeChannels": {
+        "type": "array"
+      },
+      "mode": {
+        "type": "string"
+      },
+      "next": {
+        "type": "string"
+      },
+      "note": {
+        "type": "string"
+      },
+      "ok": {
+        "type": "boolean"
+      },
+      "outDir": {
+        "type": "string"
+      },
+      "placed": {
+        "type": "boolean"
+      },
+      "plan": {
+        "type": "array"
+      },
+      "remediation": {
+        "type": "string"
+      },
+      "sampleRate": {
+        "type": "integer"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "wavs": {
+        "type": "array"
+      }
+    },
+    "type": "object"
+  }
+}
+```
+</details>
+
 #### `spatial.mirror_scene`
 
 **Profile:** `spatial` · **Hints:** mutating
@@ -7986,7 +8189,7 @@ _Track FX, parameter automation envelopes, faders, and immersive-aware style cha
 
 **Profile:** `mixing` · **Hints:** mutating
 
-Insert an automation point on a track envelope (looked up by name, e.g. 'Volume', 'Pan'). 'value' is in the envelope's native units (Volume = linear gain, Pan = -1..1). The envelope must already be active on the track; if it isn't, pass autoActivate:true to activate a built-in envelope (Volume/Pan/Width/Mute, their Pre-FX variants, Trim Volume) first.
+Insert an automation point on a track envelope (looked up by name, e.g. 'Volume', 'Pan'). 'value' is in the envelope's native units (Volume = linear gain, Pan = -1..1; an FX-param envelope's native unit is the parameter's NORMALIZED [0,1] value, not its display units). The envelope must already be active on the track; if it isn't, pass autoActivate:true to activate a built-in envelope (Volume/Pan/Width/Mute, their Pre-FX variants, Trim Volume) first, or call envelope.ensure_fx_envelope for an FX-parameter envelope.
 
 **Parameters**
 
@@ -8219,6 +8422,124 @@ Returns a structured object with: `deletedIndex`, `ok`, `pointCount`.
     "required": [
       "ok",
       "deletedIndex"
+    ],
+    "type": "object"
+  }
+}
+```
+</details>
+
+#### `envelope.ensure_fx_envelope`
+
+**Profile:** `mixing` · **Hints:** idempotent
+
+Ensure an automation envelope exists for an FX parameter, and return the envelope NAME that envelope.add_point looks up. Address the parameter by index ('param') or by name ('paramName' — resolved exact, then case-insensitive, then substring; an ambiguous request is REFUSED and names its candidates rather than picking one). Idempotent: a second call returns the same envelope and adds nothing. Points on an FX-parameter envelope are in the parameter's NORMALIZED [0,1] scale, not its display units — on an IEM encoder 'Azimuth Angle' 0.5 is 0 degrees and 0.75 is +90. Check 'addPointSafe' before using the returned name: if two FX on the track expose an identically-named parameter the name does not identify one envelope, and add_point would write to whichever REAPER returns first while reporting success.
+
+**Parameters**
+
+| Param | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `fx` | integer | yes | min 0 |
+| `param` | integer | no | min 0; parameter index; pass this OR paramName |
+| `paramName` | string | no | parameter name; pass this OR param |
+| `seedPoint` | boolean | no | default `true`; if the new envelope is not name-visible, seed one point at the parameter's current normalized value (sonically a no-op) so add_point can find it |
+| `track` | integer | yes | min 0 |
+
+_Additional properties: not allowed._
+
+**Returns**
+
+Returns a structured object with: `addPointSafe`, `created`, `envelope`, `envelopeCount`, `fx`, `fxName`, `matchedBy`, `nameCollisionCount`, `nameResolvesToThis`, `nameVisible`, `ok`, `param`, `paramName`, `pointCount`, `seeded`.
+
+<details><summary>Full JSON schema</summary>
+
+```json
+{
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "fx": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "param": {
+        "description": "parameter index; pass this OR paramName",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "paramName": {
+        "description": "parameter name; pass this OR param",
+        "type": "string"
+      },
+      "seedPoint": {
+        "default": true,
+        "description": "if the new envelope is not name-visible, seed one point at the parameter's current normalized value (sonically a no-op) so add_point can find it",
+        "type": "boolean"
+      },
+      "track": {
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "track",
+      "fx"
+    ],
+    "type": "object"
+  },
+  "outputSchema": {
+    "properties": {
+      "addPointSafe": {
+        "type": "boolean"
+      },
+      "created": {
+        "type": "boolean"
+      },
+      "envelope": {
+        "type": "string"
+      },
+      "envelopeCount": {
+        "type": "integer"
+      },
+      "fx": {
+        "type": "integer"
+      },
+      "fxName": {
+        "type": "string"
+      },
+      "matchedBy": {
+        "type": "string"
+      },
+      "nameCollisionCount": {
+        "type": "integer"
+      },
+      "nameResolvesToThis": {
+        "type": "boolean"
+      },
+      "nameVisible": {
+        "type": "boolean"
+      },
+      "ok": {
+        "type": "boolean"
+      },
+      "param": {
+        "type": "integer"
+      },
+      "paramName": {
+        "type": "string"
+      },
+      "pointCount": {
+        "type": "integer"
+      },
+      "seeded": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "ok",
+      "envelope",
+      "param",
+      "addPointSafe"
     ],
     "type": "object"
   }
@@ -12928,7 +13249,7 @@ Returns a structured object with: `dryRun`, `ok`, `stats`, `targets`, `warnings`
 
 **Profile:** `render` · **Hints:** mutating
 
-Author a native ITU-R BS.2076 ADM object-audio deliverable — a Broadcast-Wave (RIFF/WAVE, or BW64/RF64 per BS.2088 when >4 GiB) carrying a chna (channel allocation) + axml (the ADM XML) chunk beside the interleaved PCM. This is a capability REAPER lacks natively (see spatial.render_deliverables' atmos-send-layout, which can only wire the topology to an EXTERNAL Dolby Renderer). The deliverable = a DirectSpeakers BED (bedTrack at bedLayout, e.g. Atmos 7.1.2) plus N mono OBJECTS (objectTracks), each object carrying a position/gain TRAJECTORY (audioBlockFormat time-slices) SAMPLED from its panner automation over the render window (spherical az/el/distance by default; coordinateMode:cartesian emits X/Y/Z). Bed + object stems are rendered bit-exact (RENDER_* snapshot/restore, temps deleted); each object's mono essence = its rendered channel 1, its position = read from the object panner's azimuth/elevation/distance params (best-effort, like analysis.object_loudness). dryRun (the DEFAULT is false) samples the positions + plans the ADM model WITHOUT rendering or writing. Bound long programmes with boundsFlag=0 + startPos/endPos (a render blocks the main thread). Ingest-verify the file against your certified renderer (Dolby/EBU/Nuendo); inspect it with analysis.adm_inspect. Attach per-object BS.2076 metadata via objectMetadata[] (each entry keyed by its object 'track'): extent — a 'size' 0..1 knob (sets width=height=depth; the ADM normalized object size, natural in cartesian mode) or explicit width/height/depth (spherical: width/height in DEGREES, depth 0..1); objectDivergence — 'divergence' 0..1 (split into two mirror copies) with an optional 'divergenceRange' (azimuthRange deg in spherical / positionRange 0..1 in cartesian; defaults 45°/0.5); and 'importance' 0..10 (a renderer may drop lower-importance objects under load). Objects with no entry stay point sources with importance omitted. Set profile:"dolby-atmos" to author a Dolby Atmos Master ADM Profile v1.0-conformant file: it forces cartesian objects (X/Y/Z clamped [-1,1]), collapses extent to an identical [0,1] size, STRIPS objectDivergence (prohibited) and importance (permitted only on inactive objects), and emits the interpolationLength ramp (0 then 250 samples); it FAILS CLOSED on a non-Atmos bed (7.1.4/9.1.6/22.2 — route those channels as objects), a non-48k render, or >118 objects / >128 channels. The applied normalizations are echoed in 'profile'. Validate any ADM BWF's conformance with analysis.adm_profile_check. (Profile-shaped + self-validated; certified-renderer ingest is your check.) intentSidecar:true additionally writes <base>.intent.json beside the export — the session's own predictions (schema `intent: 0`: roster + trajectories + decode dominance + expect* levels, NEVER a declared loudness) which `sentinel intent-compare` verifies against the delivered file (S-340..S-346, the intent-conformance QC loop).
+Author a native ITU-R BS.2076 ADM object-audio deliverable — a Broadcast-Wave (RIFF/WAVE, or BW64/RF64 per BS.2088 when >4 GiB) carrying a chna (channel allocation) + axml (the ADM XML) chunk beside the interleaved PCM. This is a capability REAPER lacks natively (see spatial.render_deliverables' atmos-send-layout, which can only wire the topology to an EXTERNAL Dolby Renderer). The deliverable = a DirectSpeakers BED (bedTrack at bedLayout, e.g. Atmos 7.1.2) plus N mono OBJECTS (objectTracks), each object carrying a position/gain TRAJECTORY (audioBlockFormat time-slices) SAMPLED from its panner automation over the render window (spherical az/el/distance by default; coordinateMode:cartesian emits X/Y/Z). Bed + object stems are rendered bit-exact (RENDER_* snapshot/restore, temps deleted); each object's mono essence = its rendered channel 1, its position = read from the object panner's azimuth/elevation/distance params (best-effort, like analysis.object_loudness). dryRun (the DEFAULT is false) samples the positions + plans the ADM model WITHOUT rendering or writing. Bound long programmes with boundsFlag=0 + startPos/endPos (a render blocks the main thread). Ingest-verify the file against your certified renderer (Dolby/EBU/Nuendo); inspect it with analysis.adm_inspect. Attach per-object BS.2076 metadata via objectMetadata[] (each entry keyed by its object 'track'): extent — a 'size' 0..1 knob (sets width=height=depth; the ADM normalized object size, natural in cartesian mode) or explicit width/height/depth (spherical: width/height in DEGREES, depth 0..1); objectDivergence — 'divergence' 0..1 (split into two mirror copies) with an optional 'divergenceRange' (azimuthRange deg in spherical / positionRange 0..1 in cartesian; defaults 45°/0.5); and 'importance' 0..10 (a renderer may drop lower-importance objects under load). Objects with no entry stay point sources with importance omitted. Set profile:"dolby-atmos" to author a Dolby Atmos Master ADM Profile v1.0-conformant file: it forces cartesian objects (X/Y/Z clamped [-1,1]), collapses extent to an identical [0,1] size, STRIPS objectDivergence (prohibited) and importance (permitted only on inactive objects), and emits the interpolationLength ramp (0 then 250 samples); it FAILS CLOSED on a non-Atmos bed (7.1.4/9.1.6/22.2 — route those channels as objects), a non-48k render, or >118 objects / >128 channels. The applied normalizations are echoed in 'profile'. Validate any ADM BWF's conformance with analysis.adm_profile_check. (Profile-shaped + self-validated; certified-renderer ingest is your check.) dolbyMetadataChunk:"placeholder" (default "none", and INDEPENDENT of profile) emits a placeholder `dbmd` chunk AND renames the bed to Dolby's RoomCentric* channel vocabulary — one switch, both consequences, because a consumer only reads those names when a `dbmd` is present. Take it to make a file iamf-tools' ADM importer ingests with its objects intact; it ASSERTS the file is a Dolby ADM deliverable, so it is opt-in and never a default. It FAILS CLOSED on the combinations that consumer rejects: non-24-bit, a rate outside {48k, 96k}, or a bed outside 5.1 / 7.1 / 7.1.2 (7.1.4, 9.1.6 and 22.2 have no accepted Dolby pack layout — route heights as objects). intentSidecar:true additionally writes <base>.intent.json beside the export — the session's own predictions (schema `intent: 0`: roster + trajectories + decode dominance + expect* levels, NEVER a declared loudness) which `sentinel intent-compare` verifies against the delivered file (S-340..S-346, the intent-conformance QC loop).
 
 **Parameters**
 
@@ -12941,6 +13262,7 @@ Author a native ITU-R BS.2076 ADM object-audio deliverable — a Broadcast-Wave 
 | `boundsFlag` | integer | no | default `1`; range [0, 7] |
 | `contentName` | string | no | — |
 | `coordinateMode` | enum | no | one of: `spherical`, `cartesian`; default `"spherical"` |
+| `dolbyMetadataChunk` | enum | no | one of: `none`, `placeholder`; default `"none"` |
 | `dryRun` | boolean | no | default `false` |
 | `endPos` | number | no | — |
 | `intentSidecar` | boolean | no | default `false` |
@@ -12957,7 +13279,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`, `channels`, `container`, `coordinateMode`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `intentSidecarPath`, `note`, `objectCount`, `objectMetadataCount`, `objects`, `ok`, `path`, `profile`, `remediation`, `sampleRate`, `warnings`.
+Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`, `channels`, `container`, `coordinateMode`, `detail`, `dolbyMetadataChunk`, `dryRun`, `durationSec`, `error`, `frames`, `intentSidecarPath`, `note`, `objectCount`, `objectMetadataCount`, `objects`, `ok`, `path`, `profile`, `remediation`, `sampleRate`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -13010,6 +13332,14 @@ Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`,
         "enum": [
           "spherical",
           "cartesian"
+        ],
+        "type": "string"
+      },
+      "dolbyMetadataChunk": {
+        "default": "none",
+        "enum": [
+          "none",
+          "placeholder"
         ],
         "type": "string"
       },
@@ -13131,6 +13461,9 @@ Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`,
         "type": "string"
       },
       "detail": {
+        "type": "string"
+      },
+      "dolbyMetadataChunk": {
         "type": "string"
       },
       "dryRun": {
@@ -14117,7 +14450,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `adm`, `conformant`, `detail`, `error`, `format`, `isAdm`, `noteCount`, `notes`, `path`, `profile`, `remediation`, `violations`.
+Returns a structured object with: `adm`, `conformant`, `detail`, `error`, `format`, `isAdm`, `noteCount`, `notes`, `path`, `profile`, `remediation`, `violations`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -14174,6 +14507,12 @@ Returns a structured object with: `adm`, `conformant`, `detail`, `error`, `forma
         "type": "string"
       },
       "violations": {
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
         "type": "array"
       }
     },
@@ -16260,6 +16599,147 @@ Returns a structured object with: `boundsFlag`, `count`, `detail`, `dryRun`, `er
 ```
 </details>
 
+#### `analysis.verify_routing`
+
+**Profile:** `analysis` · **Hints:** read-only, idempotent
+
+Read a point in the signal path and report which identifier tone actually arrived on each channel — the read-only counterpart to spatial.inject_identity_tones, and a general routing verifier that works on any pipeline, not just an immersive one. Give it a WAV (an external file or a rendered stem) via `path`, or a live track via `track` for a render-free audio-accessor read. Detection is Goertzel at the plan's own frequencies (313 + 139*k Hz, LFE 40 Hz), so it is exact for the known tone set and reports a MEASURED margin rather than a guess: each channel comes back as identity / swapped / duplicated / dropped / bleed / silent, with marginDb (its own tone versus the strongest other tone) and planCoverage (how much of the channel that tone actually is). ok=true means every channel carried its own tone with at least minMarginDb of separation — a clean identity map. A swap names its partner, a duplicate names the other carrier, and bleed names the interfering slot, so the report says what to fix and where. Pass the channels and lfeChannels that spatial.inject_identity_tones echoed, so both halves judge the same plan; a channel-count mismatch is a refusal, never a verdict.
+
+**Parameters**
+
+| Param | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `channels` | integer | no | range [1, 128] |
+| `durationSec` | number | no | min 0 |
+| `labels` | array&lt;string&gt; | no | — |
+| `lfeChannels` | array&lt;integer&gt; | no | — |
+| `minMarginDb` | number | no | default `40.0` |
+| `path` | string | no | — |
+| `silenceDb` | number | no | default `-80.0` |
+| `startSec` | number | no | default `0`; min 0 |
+| `track` | integer | no | min 0 |
+
+_Additional properties: not allowed._
+
+**Returns**
+
+Returns a structured object with: `channels`, `detail`, `detectedMap`, `error`, `findings`, `frames`, `identityCount`, `minMarginDb`, `ok`, `path`, `perChannel`, `remediation`, `sampleRate`, `source`, `summary`, `warnings`, `worstMarginDb`.
+
+<details><summary>Full JSON schema</summary>
+
+```json
+{
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "channels": {
+        "maximum": 128,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "durationSec": {
+        "minimum": 0,
+        "type": "number"
+      },
+      "labels": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "lfeChannels": {
+        "items": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "minMarginDb": {
+        "default": 40.0,
+        "type": "number"
+      },
+      "path": {
+        "type": "string"
+      },
+      "silenceDb": {
+        "default": -80.0,
+        "type": "number"
+      },
+      "startSec": {
+        "default": 0,
+        "minimum": 0,
+        "type": "number"
+      },
+      "track": {
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "outputSchema": {
+    "properties": {
+      "channels": {
+        "type": "integer"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "detectedMap": {
+        "type": "array"
+      },
+      "error": {
+        "type": "string"
+      },
+      "findings": {
+        "type": "array"
+      },
+      "frames": {
+        "type": "integer"
+      },
+      "identityCount": {
+        "type": "integer"
+      },
+      "minMarginDb": {
+        "type": "number"
+      },
+      "ok": {
+        "type": "boolean"
+      },
+      "path": {
+        "type": "string"
+      },
+      "perChannel": {
+        "type": "array"
+      },
+      "remediation": {
+        "type": "string"
+      },
+      "sampleRate": {
+        "type": "number"
+      },
+      "source": {
+        "type": "string"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "worstMarginDb": {
+        "type": "number"
+      }
+    },
+    "type": "object"
+  }
+}
+```
+</details>
+
 ### Composite / DSL
 
 _The deterministic composite macro-DSL runner (`$ref`/capture, atomic single-undo)._
@@ -16393,6 +16873,16 @@ Read-only, addressable snapshots of REAPER state (`resources/list`, `resources/r
 
 Declarative expert workflows (`prompts/list`, `prompts/get`). Selecting one injects a message that steers the agent to call the semantic verbs in the right order — an expert immersive workflow without knowing the verb names.
 
+### `author_dolby_adm` — Author an ADM BWF whose objects survive IAMF ingest
+
+Author an ITU-R BS.2076 ADM Broadcast-Wave via spatial.export_adm and, deliberately, take its dolbyMetadataChunk opt-in — a placeholder `dbmd` chunk plus RoomCentric* bed names — so iamf-tools' ADM importer keeps the objects instead of dropping them. States what the opt-in asserts before taking it, and verifies the result with analysis.adm_inspect.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `bed` | no | Bed layout: 5.1, 7.1 or 7.1.2 (default 7.1.2 — larger beds have no accepted Dolby pack layout) |
+| `objects` | no | Object track indices or names (default: ask) |
+| `outPath` | no | Where to write the .wav (default: the project directory) |
+
 ### `deliver_to_iamf` — Deliver the session to IAMF (open immersive)
 
 Render bed / ambisonic-scene / VO stems and emit a ready-to-compile iamf-loom manifest via spatial.export_loom_manifest, then validate the packaged output with iamf-sentinel — the open, royalty-free IAMF delivery pipeline (see MANUAL §9, Delivering to IAMF).
@@ -16436,4 +16926,4 @@ Scaffold an immersive Dolby Atmos session — a bed, N object tracks, a binaural
 
 ---
 
-_Reference generated 2026-08-04 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._
+_Reference generated 2026-08-05 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._

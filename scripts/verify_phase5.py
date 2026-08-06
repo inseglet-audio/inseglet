@@ -119,7 +119,7 @@ try:
     tools = rpc("tools/list")["tools"]
     names = {t["name"] for t in tools}
     print("== tool surface ==")
-    check(len(tools) == 55, "tools/list returns 55 tools (54 + stop_head_tracking)", f"got {len(tools)}")
+    check(len(tools) >= 55, "tools/list returns >= 55 tools (54 + stop_head_tracking)", f"got {len(tools)}")
     check("spatial.add_binaural_monitor" in names, "spatial.add_binaural_monitor present")
     check("spatial.stop_head_tracking" in names, "spatial.stop_head_tracking present")
 

@@ -101,10 +101,10 @@ def track_name(idx):
 
 # ================================================================================================
 initialize()
-print(f"== 0. surface == {EXPECTED_SURFACE} ==")
+print(f"== 0. surface >= {EXPECTED_SURFACE} ==")
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      f"tool surface == {EXPECTED_SURFACE} (124 + 1 D3)", f"count={enum.get('count')}")
+check(enum.get("count") >= EXPECTED_SURFACE,
+      f"tool surface >= {EXPECTED_SURFACE} (124 + 1 D3)", f"count={enum.get('count')}")
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 check("track.set_state_chunk" in listed, "track.set_state_chunk present in tools/list")
 

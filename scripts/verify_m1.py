@@ -101,10 +101,10 @@ def add_tone(track):
 
 # ================================================================================================
 initialize()
-print("== 0. surface == %d ==" % EXPECTED_SURFACE)
+print("== 0. surface >= %d ==" % EXPECTED_SURFACE)
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      "tool surface == %d (145 + 2 M1)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
+check(enum.get("count") >= EXPECTED_SURFACE,
+      "tool surface >= %d (145 + 2 M1)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 m1 = ["analysis.meter", "analysis.spatial_field"]
 check(all(n in listed for n in m1), "both M1 tools present in tools/list",

@@ -12,12 +12,21 @@
 // envelope.add_point writes to an ALREADY-ACTIVE track envelope (looked up by name, e.g. "Volume",
 // "Pan", or an FX-param envelope). Values are in the envelope's native units (Volume = linear gain,
 // Pan = -1..1), matching REAPER's InsertEnvelopePoint. Dual-path; mutations single-undo.
+//
+// envelope.ensure_fx_envelope (doc 136) covers the case autoActivate cannot: an FX-PARAM envelope,
+// which has no track-chunk block name and so needs the FX+param context rather than a chunk edit.
+// It wraps GetFXEnvelope(..., create=true), but its contract is the STRING, not the envelope —
+// add_point resolves its target with GetTrackEnvelopeByName, so the verb returns the envelope's
+// actual name and reports whether that name identifies exactly one envelope on the track. The
+// pure halves of that question (param-name resolution, name-collision counting) live SDK-free in
+// ../fx_envelope.h and are unit-tested off-REAPER as unit.fx_envelope.
 
 #include <cstdio>
 #include <string>
 #include <vector>
 
 #include "tool_helpers.h"
+#include "../fx_envelope.h"
 #include "../tool_registry.h"
 
 namespace reaper_mcp {
@@ -174,9 +183,11 @@ void registerEnvelopeTools(ToolRegistry& reg) {
     reg.add(Tool{
         "envelope.add_point",
         "Insert an automation point on a track envelope (looked up by name, e.g. 'Volume', 'Pan'). "
-        "'value' is in the envelope's native units (Volume = linear gain, Pan = -1..1). The envelope "
-        "must already be active on the track; if it isn't, pass autoActivate:true to activate a "
-        "built-in envelope (Volume/Pan/Width/Mute, their Pre-FX variants, Trim Volume) first.",
+        "'value' is in the envelope's native units (Volume = linear gain, Pan = -1..1; an FX-param "
+        "envelope's native unit is the parameter's NORMALIZED [0,1] value, not its display units). "
+        "The envelope must already be active on the track; if it isn't, pass autoActivate:true to "
+        "activate a built-in envelope (Volume/Pan/Width/Mute, their Pre-FX variants, Trim Volume) "
+        "first, or call envelope.ensure_fx_envelope for an FX-parameter envelope.",
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "envelope":{"type":"string"},"time":{"type":"number"},"value":{"type":"number"},
             "shape":{"type":"integer","minimum":0,"maximum":5,"default":0,
@@ -215,7 +226,8 @@ void registerEnvelopeTools(ToolRegistry& reg) {
                                              "': " + via);
                 throw std::runtime_error(
                     "envelope not active on track: '" + name + "' — pass autoActivate:true (built-in "
-                    "envelopes), or show/arm it in REAPER / add the FX param it automates first");
+                    "envelopes), or call envelope.ensure_fx_envelope {track, fx, param} for an "
+                    "FX-parameter envelope, or show/arm it in REAPER first");
             }
             InsertEnvelopePoint(e, time, value, shape, 0.0, selected, nullptr);
             Envelope_SortPoints(e);
@@ -381,6 +393,168 @@ void registerEnvelopeTools(ToolRegistry& reg) {
 #else
             (void)idx;
             return Json{{"ok", true}, {"mode", mode}, {"previousMode", 0}};
+#endif
+        }});
+
+    // =====================================================================================
+    // FX-parameter envelopes (doc 136) — the authoring seam add_point could not reach.
+    // =====================================================================================
+
+    // ---- envelope.ensure_fx_envelope (mutating; idempotent) ----
+    reg.add(Tool{
+        "envelope.ensure_fx_envelope",
+        "Ensure an automation envelope exists for an FX parameter, and return the envelope NAME "
+        "that envelope.add_point looks up. Address the parameter by index ('param') or by name "
+        "('paramName' — resolved exact, then case-insensitive, then substring; an ambiguous "
+        "request is REFUSED and names its candidates rather than picking one). Idempotent: a "
+        "second call returns the same envelope and adds nothing. Points on an FX-parameter "
+        "envelope are in the parameter's NORMALIZED [0,1] scale, not its display units — on an "
+        "IEM encoder 'Azimuth Angle' 0.5 is 0 degrees and 0.75 is +90. Check 'addPointSafe' "
+        "before using the returned name: if two FX on the track expose an identically-named "
+        "parameter the name does not identify one envelope, and add_point would write to "
+        "whichever REAPER returns first while reporting success.",
+        jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
+            "fx":{"type":"integer","minimum":0},
+            "param":{"type":"integer","minimum":0,"description":"parameter index; pass this OR paramName"},
+            "paramName":{"type":"string","description":"parameter name; pass this OR param"},
+            "seedPoint":{"type":"boolean","default":true,
+                "description":"if the new envelope is not name-visible, seed one point at the parameter's current normalized value (sonically a no-op) so add_point can find it"}},
+            "required":["track","fx"],"additionalProperties":false})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},
+            "envelope":{"type":"string"},"fx":{"type":"integer"},"fxName":{"type":"string"},
+            "param":{"type":"integer"},"paramName":{"type":"string"},"matchedBy":{"type":"string"},
+            "created":{"type":"boolean"},"seeded":{"type":"boolean"},
+            "nameVisible":{"type":"boolean"},"nameResolvesToThis":{"type":"boolean"},
+            "nameCollisionCount":{"type":"integer"},"addPointSafe":{"type":"boolean"},
+            "pointCount":{"type":"integer"},"envelopeCount":{"type":"integer"}},
+            "required":["ok","envelope","param","addPointSafe"]})"),
+        ToolAnnotations{/*readOnly*/ false, /*destructive*/ false, /*idempotent*/ true},
+        Profile::Mixing,
+        [](const Json& a) -> Json {
+            const int idx = reqInt(a, "track");
+            const int fx = reqInt(a, "fx");
+            const bool byIndex = a.contains("param") && a["param"].is_number();
+            const bool byName = a.contains("paramName") && a["paramName"].is_string();
+            if (byIndex == byName)
+                throw std::runtime_error(
+                    "pass exactly one of 'param' (index) or 'paramName' (string)");
+            const std::string wantName = byName ? a["paramName"].get<std::string>() : std::string();
+            const bool seedPoint = optBool(a, "seedPoint", true);
+#ifdef REAPER_MCP_HAVE_SDK
+            MediaTrack* t = requireTrack(idx);
+            const int nfx = TrackFX_GetCount(t);
+            if (fx < 0 || fx >= nfx)
+                throw std::runtime_error("fx index out of range on track " + std::to_string(idx) +
+                                         ": " + std::to_string(fx) + " (track has " +
+                                         std::to_string(nfx) + ")");
+            const int np = TrackFX_GetNumParams(t, fx);
+
+            // The param roster, in index order — both addressing modes and every error message
+            // read from it, so a refusal can name what it could not choose between.
+            std::vector<std::string> roster;
+            roster.reserve(static_cast<std::size_t>(np > 0 ? np : 0));
+            for (int p = 0; p < np; ++p) {
+                char pn[256] = {0};
+                TrackFX_GetParamName(t, fx, p, pn, static_cast<int>(sizeof(pn)));
+                roster.push_back(pn);
+            }
+
+            int param = -1;
+            std::string matchedBy = "index";
+            if (byIndex) {
+                param = a["param"].get<int>();
+                if (param < 0 || param >= np)
+                    throw std::runtime_error("param index out of range on fx " +
+                                             std::to_string(fx) + ": " + std::to_string(param) +
+                                             " (fx has " + std::to_string(np) + " parameters)");
+            } else {
+                const fxenv::ParamMatch m = fxenv::resolveParam(roster, wantName);
+                if (m.ambiguous) {
+                    std::string names;
+                    for (std::size_t i = 0; i < m.candidates.size(); ++i) {
+                        if (i) names += ", ";
+                        names += "[" + std::to_string(m.candidates[i]) + "] " +
+                                 roster[static_cast<std::size_t>(m.candidates[i])];
+                    }
+                    throw std::runtime_error("paramName '" + wantName + "' is ambiguous on fx " +
+                                             std::to_string(fx) + " — it matches " +
+                                             std::to_string(m.candidateCount) + " parameters (" +
+                                             names + "). Pass 'param' or a more specific name.");
+                }
+                if (!m.resolved())
+                    throw std::runtime_error("no parameter matching '" + wantName + "' on fx " +
+                                             std::to_string(fx) + " (" + std::to_string(np) +
+                                             " parameters)");
+                param = m.index;
+                matchedBy = fxenv::matchKindName(m.kind);
+            }
+
+            const int envBefore = CountTrackEnvelopes(t);
+            Undo_BeginBlock2(kCur);
+            TrackEnvelope* e = GetFXEnvelope(t, fx, param, true);  // create
+            if (!e) {
+                Undo_EndBlock2(kCur, "MCP: ensure FX envelope", -1);
+                throw std::runtime_error("REAPER returned no envelope for fx " +
+                                         std::to_string(fx) + " param " + std::to_string(param) +
+                                         " ('" + roster[static_cast<std::size_t>(param)] + "')");
+            }
+            const std::string name = envName(e);
+
+            // The contract is not "an envelope exists", it is "add_point can find it by name" —
+            // add_point resolves with GetTrackEnvelopeByName. A freshly created, point-less
+            // envelope may not be name-visible: the built-in activation path above exists for
+            // exactly that reason (REAPER prunes point-less envelope blocks). Seed one point at
+            // the parameter's CURRENT normalized value, which makes the seed sonically a no-op
+            // just as envSeedValue() does for built-ins, and re-check rather than assume.
+            bool seeded = false;
+            bool nameVisible = (GetTrackEnvelopeByName(t, name.c_str()) != nullptr);
+            if (!nameVisible && seedPoint && CountEnvelopePoints(e) == 0) {
+                InsertEnvelopePoint(e, 0.0, TrackFX_GetParamNormalized(t, fx, param), 0, 0.0,
+                                    false, nullptr);
+                Envelope_SortPoints(e);
+                seeded = true;
+                nameVisible = (GetTrackEnvelopeByName(t, name.c_str()) != nullptr);
+            }
+            Undo_EndBlock2(kCur, "MCP: ensure FX envelope", -1);
+
+            // Does the name identify THIS envelope? Two FX exposing an identically-named
+            // parameter make the by-name lookup ambiguous, and add_point would write to
+            // whichever REAPER returns while reporting ok:true. Report it — there is no by-name
+            // workaround to offer, so the caller has to know before it writes.
+            const bool nameResolvesToThis = (GetTrackEnvelopeByName(t, name.c_str()) == e);
+            const int envAfter = CountTrackEnvelopes(t);
+            std::vector<std::string> envNames;
+            envNames.reserve(static_cast<std::size_t>(envAfter > 0 ? envAfter : 0));
+            for (int i = 0; i < envAfter; ++i) envNames.push_back(envName(GetTrackEnvelope(t, i)));
+            const int collisions = fxenv::nameCollisionCount(envNames, name);
+
+            char fxn[256] = {0};
+            TrackFX_GetFXName(t, fx, fxn, static_cast<int>(sizeof(fxn)));
+
+            return Json{{"ok", true},
+                        {"envelope", name},
+                        {"fx", fx},
+                        {"fxName", fxn},
+                        {"param", param},
+                        {"paramName", roster[static_cast<std::size_t>(param)]},
+                        {"matchedBy", matchedBy},
+                        {"created", envAfter > envBefore},
+                        {"seeded", seeded},
+                        {"nameVisible", nameVisible},
+                        {"nameResolvesToThis", nameResolvesToThis},
+                        {"nameCollisionCount", collisions},
+                        {"addPointSafe", nameResolvesToThis && collisions == 1},
+                        {"pointCount", CountEnvelopePoints(e)},
+                        {"envelopeCount", envAfter}};
+#else
+            (void)idx; (void)fx; (void)seedPoint;
+            const std::string nm = byName ? wantName : std::string("Param");
+            return Json{{"ok", true}, {"envelope", nm}, {"fx", fx}, {"fxName", ""},
+                        {"param", byIndex ? a["param"].get<int>() : 0}, {"paramName", nm},
+                        {"matchedBy", byIndex ? "index" : "exact"}, {"created", true},
+                        {"seeded", false}, {"nameVisible", true}, {"nameResolvesToThis", true},
+                        {"nameCollisionCount", 1}, {"addPointSafe", true},
+                        {"pointCount", 0}, {"envelopeCount", 1}};
 #endif
         }});
 }

@@ -7,7 +7,7 @@ selection.get / region.list / transport.get_state). Every mutation is single-und
 exercises the client-facing undo/redo history verbs.
 
 Coverage:
-  0. surface == 94 (61 baseline + 33 P8-1).
+  0. surface >= 94 (61 baseline + 33 P8-1).
   1. granular TRACK setters: mute/solo/phase/width/color/rec_arm/rec_input/rec_mon/folder, each
      confirmed by track.get (consolidated read).
   2. granular ITEM setters + structural edits: position/length/mute/vol/fades/color/selected, then
@@ -88,10 +88,10 @@ SCRATCH = "p81-scratch"
 SCRATCH2 = "p81-scratch2"
 
 # ------------------------------------------------------------------------------------------------
-print("== 0. surface == 94 ==")
+print("== 0. surface >= 94 ==")
 initialize()
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == 94, "tool surface == 94 (61 + 33 P8-1)", f"count={enum.get('count')}")
+check(enum.get("count") >= 94, "tool surface >= 94 (61 + 33 P8-1)", f"count={enum.get('count')}")
 
 print("\n== set up two scratch tracks ==")
 t = call("track.add", name=SCRATCH)

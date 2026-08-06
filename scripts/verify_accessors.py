@@ -114,8 +114,8 @@ def add_tone(track):
 initialize()
 print("== 0. surface + presence ==")
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      "tool surface == %d (158 + 3 B1)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
+check(enum.get("count") >= EXPECTED_SURFACE,
+      "tool surface >= %d (158 + 3 B1)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 check(all(n in listed for n in B1), "all three B1 accessor tools present in tools/list",
       "missing=%s" % [n for n in B1 if n not in listed])

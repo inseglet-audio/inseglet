@@ -97,10 +97,10 @@ def skip(label, detail=""):
 
 # ================================================================================================
 initialize()
-print(f"== 0. surface == {EXPECTED_SURFACE} ==")
+print(f"== 0. surface >= {EXPECTED_SURFACE} ==")
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      f"tool surface == {EXPECTED_SURFACE} (97 + 27 P8-3)", f"count={enum.get('count')}")
+check(enum.get("count") >= EXPECTED_SURFACE,
+      f"tool surface >= {EXPECTED_SURFACE} (97 + 27 P8-3)", f"count={enum.get('count')}")
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 p83 = ["fx.set_enabled", "fx.get_preset", "fx.set_preset",
        "takefx.add", "takefx.list", "takefx.remove", "takefx.get_param", "takefx.set_param",

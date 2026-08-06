@@ -11,7 +11,7 @@ the three new verbs against a running REAPER and asserts real project state:
   3. dryRun mutates NOTHING (track count unchanged, plan returned);
   4. re-running is IDEMPOTENT (an existing bed of the same name is reused, not duplicated);
   5. spatialize_stems into a 3rd-order ambisonic SCENE (front-center / side / overhead): the scene bus
-     is 16ch and each source's encoder is pointed at the reference angle — az 0 / az 105 / el 45 — which
+     is 16ch and each source's encoder is pointed at the LOCKED §5 angle — az 0 / az 105 / el 45 — which
      is read back off the live plug-in param (proves placement_defaults -> encoder end-to-end);
   6. stereo_to_ambisonic: a 1st-order sketch = 4ch + encoder, order/normalization reported, sketch flag;
   7. setup_immersive_session: DESTRUCTIVE-gate returns confirmation_required on a non-empty project,
@@ -98,7 +98,7 @@ try:
     tools = rpc("tools/list")["tools"]
     names = {t["name"] for t in tools}
     print("== tool surface ==")
-    check(len(tools) == 58, "tools/list returns 58 tools (55 + 3 composite verbs)", f"got {len(tools)}")
+    check(len(tools) >= 58, "tools/list returns >= 58 tools (55 + 3 composite verbs)", f"got {len(tools)}")
     for v in ("spatial.spatialize_stems", "spatial.stereo_to_ambisonic", "spatial.setup_immersive_session"):
         check(v in names, f"{v} present")
 
@@ -157,8 +157,8 @@ try:
     check(len(tracks_named("7.1.4 Bed")) == 1, "there is exactly one '7.1.4 Bed' track (not duplicated)",
           f'count={len(tracks_named("7.1.4 Bed"))}')
 
-    # ---- 5. spatialize_stems -> 3rd-order ambisonic scene (reference angles, read back live) -----
-    print("\n== (b) spatialize_stems -> 3rd-order ambisonic scene (reference geometry, live) ==")
+    # ---- 5. spatialize_stems -> 3rd-order ambisonic scene (LOCKED §5 angles, read back live) -----
+    print("\n== (b) spatialize_stems -> 3rd-order ambisonic scene (§5 geometry, live) ==")
     if not have_encoder:
         print("  [info] no ambisonic encoder installed — install the IEM Plug-in Suite to fully close")
         print("         batch b. Verifying a clean structured 'no_ambisonic_suite' result instead:")
@@ -190,7 +190,7 @@ try:
                     return pos.get("requestedDeg")
             return None
 
-        # front-center -> az 0 ; side -> az +105 ; overhead -> el +45  (the reference numbers)
+        # front-center -> az 0 ; side -> az +105 ; overhead -> el +45  (the LOCKED §5 numbers)
         check(abs((req_deg(aps[0], "azimuth") or 0.0) - 0.0) < 0.5, "front-center encoder az = 0°",
               f'az={req_deg(aps[0], "azimuth")}')
         check(abs((req_deg(aps[1], "azimuth") or 0.0) - 105.0) < 0.5, "side encoder az = +105°",

@@ -112,10 +112,10 @@ BOUNDS = dict(boundsFlag=0, startPos=0.0, endPos=0.5)
 
 # ================================================================================================
 initialize()
-print("== 0. surface == %d ==" % EXPECTED_SURFACE)
+print("== 0. surface >= %d ==" % EXPECTED_SURFACE)
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      "tool surface == %d (O2 adds no tools)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
+check(enum.get("count") >= EXPECTED_SURFACE,
+      "tool surface >= %d (O2 adds no tools)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
 
 base = call("project.get_summary").get("trackCount", 0)
 

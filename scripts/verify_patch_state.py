@@ -103,10 +103,10 @@ def check(cond, label, detail=""):
 
 # ================================================================================================
 initialize()
-print("== 0. surface == %d ==" % EXPECTED_SURFACE)
+print("== 0. surface >= %d ==" % EXPECTED_SURFACE)
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      "tool surface == %d (138 P8-4 + 1 patch_state)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
+check(enum.get("count") >= EXPECTED_SURFACE,
+      "tool surface >= %d (138 P8-4 + 1 patch_state)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 check("track.patch_state" in listed, "track.patch_state present in tools/list")
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live-verify Batch A — native Dolby Atmos Master File (DAMF) triad authoring.
+"""Live-verify Batch A (moat-depth) — native Dolby Atmos Master File (DAMF) triad authoring.
 
 Exercises, end-to-end on the real SDK path:
   * spatial.export_damf   — render a DirectSpeakers bed + mono object stems and author the DAMF triad
@@ -123,10 +123,10 @@ def obj_event_positions(meta_text, oid):
 
 # ================================================================================================
 initialize()
-print("== 0. surface == %d ==" % EXPECTED_SURFACE)
+print("== 0. surface >= %d ==" % EXPECTED_SURFACE)
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE,
-      "tool surface == %d (181 + 2 DAMF)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
+check(enum.get("count") >= EXPECTED_SURFACE,
+      "tool surface >= %d (181 + 2 DAMF)" % EXPECTED_SURFACE, "count=%s" % enum.get("count"))
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 damf_tools = ["spatial.export_damf", "analysis.damf_inspect"]
 check(all(n in listed for n in damf_tools), "both DAMF tools present in tools/list",

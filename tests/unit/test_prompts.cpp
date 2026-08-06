@@ -37,17 +37,22 @@ int main() {
     PromptRegistry reg;
     registerExpertPrompts(reg);
 
-    check(reg.size() == 4, "registerExpertPrompts registers 4 prompts");
+    // Doc 141 moved this pin 4 -> 5 (author_dolby_adm). A DELIBERATE surface change, not a fix:
+    // the fifth prompt is the worked example for spatial.export_adm's dolbyMetadataChunk opt-in.
+    // It sorts FIRST alphabetically, so every index below shifts by one — which is the point of
+    // pinning the order rather than only the count.
+    check(reg.size() == 5, "registerExpertPrompts registers 5 prompts");
 
     // ---- listJson: shape + deterministic order ----
     const json list = reg.listJson();
     check(list.contains("prompts") && list["prompts"].is_array(), "listJson has prompts[]");
     const json& ps = list["prompts"];
-    check(ps.size() == 4, "listJson lists all 4");
-    check(ps[0].value("name", "") == "deliver_to_iamf", "order[0] = deliver_to_iamf");
-    check(ps[1].value("name", "") == "encode_to_ambisonics", "order[1] = encode_to_ambisonics");
-    check(ps[2].value("name", "") == "master_for_delivery", "order[2] = master_for_delivery");
-    check(ps[3].value("name", "") == "setup_atmos_session", "order[3] = setup_atmos_session");
+    check(ps.size() == 5, "listJson lists all 5");
+    check(ps[0].value("name", "") == "author_dolby_adm", "order[0] = author_dolby_adm");
+    check(ps[1].value("name", "") == "deliver_to_iamf", "order[1] = deliver_to_iamf");
+    check(ps[2].value("name", "") == "encode_to_ambisonics", "order[2] = encode_to_ambisonics");
+    check(ps[3].value("name", "") == "master_for_delivery", "order[3] = master_for_delivery");
+    check(ps[4].value("name", "") == "setup_atmos_session", "order[4] = setup_atmos_session");
     for (const auto& p : ps) {
         check(p.contains("description") && !p.value("description", "").empty(), "prompt has description");
         check(p.contains("title") && !p.value("title", "").empty(), "prompt has title");

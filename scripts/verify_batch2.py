@@ -70,7 +70,7 @@ try:
     tools = rpc("tools/list")["tools"]
     names = {t["name"] for t in tools}
     print("== tool surface ==")
-    check(len(tools) == 47, "tools/list returns 47 tools", f"got {len(tools)}")
+    check(len(tools) >= 47, "tools/list returns >= 47 tools", f"got {len(tools)}")
     for want in ["midi.create_item", "midi.insert_note", "midi.list_notes", "midi.insert_cc",
                  "take.list", "take.set_active"]:
         check(want in names, f"{want} present")

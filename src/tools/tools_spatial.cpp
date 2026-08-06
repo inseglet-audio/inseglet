@@ -34,7 +34,7 @@
 //         spatial.mirror_scene, spatial.beamform, spatial.set_distance
 //   Native object-audio authoring (ITU-R BS.2076 ADM BWF):
 //         spatial.author_object_bed, spatial.export_adm
-//   IAMF delivery bridge (emit an iamf-loom manifest + Loom-order WAVs):
+//   IAMF delivery bridge (emit an iamf-loom manifest + Loom-order WAVs; doc 107 §6-P2):
 //         spatial.export_loom_manifest
 //   (head_track_bridge.h is the SDK-free OSC parser + apply.)
 //
@@ -80,13 +80,14 @@
 #include "../adm_profile.h"    // Dolby Atmos Master ADM Profile normalize + validate
 #include "../damf.h"           // native Dolby Atmos Master File (DAMF) triad serializer (spatial.export_damf)
 #include "../loom_manifest.h"  // Inseglet -> iamf-loom bridge: manifest/season emitters + Loom-order WAV writer
-#include "../intent_sidecar.h" // B1 R1/R2: schema-v0 intent-sidecar emitter + prediction helpers
+#include "../intent_sidecar.h" // B1 R1/R2: schema-v0 intent-sidecar emitter + prediction helpers (doc 124)
 #include "../inseglet_version.h"  // the ONE in-source version string (producer stamp)
 #include "../bed_weights.h"    // F33-conformant BS.1770-4 channel weights (whole-bed expectLufs)
 #include "../send_layout.h"    // SDK-free object send-layout roster/encode/reconcile/inspect (Batch L1)
 #include "../tool_registry.h"
 #include "../spatial_verbs.h"  // SDK-free planning core (target/placement/plan) + composite_support
-#include "../position_params.h"  // D3: representation-aware positional-param discovery
+#include "../position_params.h"  // D3 (doc 125): representation-aware positional-param discovery
+#include "../identity_tones.h"   // B4 (doc 135): the corpus tone plan + Goertzel routing detector
 
 namespace reaper_mcp {
 
@@ -991,7 +992,7 @@ std::vector<adm::Block> objectTrajectory(MediaTrack* t, double startWin, double 
     return blocks;
 }
 
-// ---- intent-sidecar measurement helpers (B1 R1/R2) --------------------------------
+// ---- intent-sidecar measurement helpers (B1 R1/R2, doc 124) --------------------------------
 // K-weighted gated loudness of one already-rendered channel (weight 1.0 — the consumer's
 // per-stem convention; positional weights apply only to the whole bed).
 double intentMonoLufs(const std::vector<float>& x, double sampleRate) {
@@ -1344,7 +1345,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                 (a.contains("paramY") && a["paramY"].is_number()) ||
                 (a.contains("paramZ") && a["paramZ"].is_number());
 
-            // ---- D3: angle-representation panner -> drive azimuth/elevation. The
+            // ---- D3 (doc 125): angle-representation panner -> drive azimuth/elevation. The
             //      bare-letter scan used to land on "Quaternion X" — and on "aZimuth Angle"
             //      for z — on IEM encoders: params the exporter never samples, so a "set"
             //      succeeded while the exported trajectory never moved. Explicit paramX/Y/Z
@@ -3299,7 +3300,14 @@ void registerSpatialTools(ToolRegistry& reg) {
         "(7.1.4/9.1.6/22.2 — route those channels as objects), a non-48k render, or >118 objects / >128 "
         "channels. The applied normalizations are echoed in 'profile'. Validate any ADM BWF's conformance "
         "with analysis.adm_profile_check. (Profile-shaped + self-validated; certified-renderer ingest is "
-        "your check.) intentSidecar:true additionally writes <base>.intent.json beside the export — the "
+        "your check.) dolbyMetadataChunk:\"placeholder\" (default \"none\", and INDEPENDENT of profile) "
+        "emits a placeholder `dbmd` chunk AND renames the bed to Dolby's RoomCentric* channel "
+        "vocabulary — one switch, both consequences, because a consumer only reads those names when a "
+        "`dbmd` is present. Take it to make a file iamf-tools' ADM importer ingests with its objects "
+        "intact; it ASSERTS the file is a Dolby ADM deliverable, so it is opt-in and never a default. "
+        "It FAILS CLOSED on the combinations that consumer rejects: non-24-bit, a rate outside "
+        "{48k, 96k}, or a bed outside 5.1 / 7.1 / 7.1.2 (7.1.4, 9.1.6 and 22.2 have no accepted Dolby "
+        "pack layout — route heights as objects). intentSidecar:true additionally writes <base>.intent.json beside the export — the "
         "session's own predictions (schema `intent: 0`: roster + trajectories + decode dominance + "
         "expect* levels, NEVER a declared loudness) which `sentinel intent-compare` verifies against "
         "the delivered file (S-340..S-346, the intent-conformance QC loop).",
@@ -3319,6 +3327,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             "outPath":{"type":"string"},
             "coordinateMode":{"type":"string","enum":["spherical","cartesian"],"default":"spherical"},
             "profile":{"type":"string","enum":["none","dolby-atmos"],"default":"none"},
+            "dolbyMetadataChunk":{"type":"string","enum":["none","placeholder"],"default":"none"},
             "bitDepth":{"type":"integer","enum":[16,24,32],"default":24},
             "blockMs":{"type":"number","minimum":1,"default":100},
             "maxBlocks":{"type":"integer","minimum":1,"default":1000},
@@ -3337,7 +3346,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             "bedLayout":{"type":"string"},"bedChannels":{"type":"integer"},"objectCount":{"type":"integer"},
             "objectMetadataCount":{"type":"integer"},
             "coordinateMode":{"type":"string"},"objects":{"type":"array"},"adm":{"type":"object"},
-            "profile":{"type":"object"},
+            "profile":{"type":"object"},"dolbyMetadataChunk":{"type":"string"},
             "warnings":{"type":"array","items":{"type":"string"}},"note":{"type":"string"},
             "error":{"type":"string"},"detail":{"type":"string"},"remediation":{"type":"string"}}})"),
         ToolAnnotations{/*readOnly*/ false, /*destructive*/ false, /*idempotent*/ false},
@@ -3351,6 +3360,11 @@ void registerSpatialTools(ToolRegistry& reg) {
                                                                 : adm::Coord::Spherical;
             const std::string profileMode = optStr(a, "profile", "none");
             const bool wantProfile = (profileMode == "dolby-atmos");
+            // `dbmd` posture — INDEPENDENT of `profile` above. profile:"dolby-atmos" still emits no
+            // `dbmd` (batch O3's pinned chunk list does not move); this switch is the only thing that
+            // does. Default "none" => byte-identical output to a pre-doc-141 export.
+            const std::string dolbyMetaMode = optStr(a, "dolbyMetadataChunk", "none");
+            const bool wantDbmd = (dolbyMetaMode == "placeholder");
             int bitDepth = optInt(a, "bitDepth", 24);
             if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32) bitDepth = 24;
             const double blockMs = optNum(a, "blockMs", 100.0);
@@ -3411,6 +3425,20 @@ void registerSpatialTools(ToolRegistry& reg) {
             m.durationSec = durationSec;
             m.bedLayoutName = (bedTrack >= 0) ? bedLayout : "";
             m.bed = bed;
+            m.dolbyMetadataChunk = wantDbmd ? adm::DolbyMetadata::Placeholder
+                                            : adm::DolbyMetadata::None;
+            // Refuse the bit-depth and bed-layout halves BEFORE rendering — a render is expensive,
+            // and an unguarded dolbyMetadataChunk yields a file the consumer rejects outright,
+            // which is strictly WORSE than declining the option. The sample-rate half cannot be
+            // known until the real render; it is re-checked below, exactly as the Atmos profile
+            // re-checks its own 48 kHz invariant against the rendered rate.
+            {
+                const std::string ref = adm::dolbyMetadataRefusal(m);
+                if (!ref.empty())
+                    return makeError("dolby_metadata_refused",
+                                     "dolbyMetadataChunk \"placeholder\" cannot be used with this "
+                                     "export", ref);
+            }
 
             // Apply the per-object BS.2076 metadata (extent / objectDivergence / importance)
             // from objectMetadata[] (matched by 'track'). Values are written uniformly onto every
@@ -3529,6 +3557,29 @@ void registerSpatialTools(ToolRegistry& reg) {
                 profileJson["normalized"] = normed;
             }
 
+            // Runtime discoverability (doc 140 §6). An opt-in nobody discovers is an opt-in that
+            // does not exist. FIRE IT PRECISELY — only when dynamic objects are present AND the
+            // switch is off, the one configuration where the gate actually bites; a bed-only
+            // export never sees this. The failure mode for a runtime hint is not going unread, it
+            // is being ALWAYS read and therefore filtered.
+            //
+            // Worded as a DISCLOSURE, not an advertisement: consequence, knob, and what taking the
+            // knob ASSERTS, in one breath. ⚠️ It is a claim about third-party software, so it
+            // carries the date it was measured and is on the decay watchlist — upstream is actively
+            // reworking this importer (b/450899154). Precedent: the F32 `stts` repair's self-retirement.
+            if (!m.objects.empty() && !wantDbmd)
+                warnings.push_back(
+                    "this export carries " + std::to_string(m.objects.size()) +
+                    " dynamic object(s) but no `dbmd` chunk, so iamf-tools' ADM importer takes its "
+                    "DEFAULT path, rejects every audioObject as \"Not under common definition\" "
+                    "and FAILS the encode with \"No audioObject present\" — no IAMF file is "
+                    "produced at all, not even a bed-only one (measured 2026-08-06 against "
+                    "iamf-tools main 19019e3; certified Dolby/EBU renderers are unaffected and "
+                    "ingest this export normally). Set dolbyMetadataChunk:\"placeholder\" to emit "
+                    "one — note that doing so also renames the bed to Dolby's RoomCentric* "
+                    "vocabulary and thereby ASSERTS the file is a Dolby ADM deliverable, so take "
+                    "it deliberately.");
+
             if (dryRun) {
                 Json ret{{"dryRun", true}, {"ok", true}, {"path", outPath},
                          {"bedLayout", m.bedLayoutName}, {"bedChannels", bedCh},
@@ -3536,6 +3587,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                          {"objectMetadataCount", objectMetadataCount},
                          {"coordinateMode", reportedCoordMode}, {"bitDepth", bitDepth},
                          {"durationSec", durationSec}, {"objects", objReport}, {"profile", profileJson},
+                         {"dolbyMetadataChunk", dolbyMetaMode},
                          {"warnings", warnings},
                          {"note", "dryRun: sampled object positions + planned the ADM model; "
                                   "no render, no file written."}};
@@ -3614,6 +3666,15 @@ void registerSpatialTools(ToolRegistry& reg) {
                                      " Hz file; the Dolby Atmos Master ADM Profile mandates 48000",
                                  "set the project/render sample rate to 48000 and retry");
 
+            // Re-check the `dbmd` refusals against the ACTUAL rendered rate — the sample-rate half
+            // (C2) could not be known before the render. Same shape as the Atmos profile's 48 kHz
+            // re-check directly above. writeAdmImage would also fail closed here, but it would
+            // surface as a generic adm_write_failed; this returns the named remedy instead.
+            if (const std::string ref = adm::dolbyMetadataRefusal(m); !ref.empty())
+                return makeError("dolby_metadata_refused",
+                                 "dolbyMetadataChunk \"placeholder\" cannot be used with this export",
+                                 ref);
+
             adm::WriteResult wr = adm::writeAdmImage(m, channels, frames);
             if (!wr.ok) return makeError("adm_write_failed", "could not assemble the ADM image: " + wr.error, "");
 
@@ -3624,7 +3685,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             os.close();
             if (!os) return makeError("file_write_failed", "error writing the ADM file to " + outPath, "");
 
-            // ---- intent sidecar (B1 R1): the session's own predictions, written
+            // ---- intent sidecar (B1 R1, doc 124): the session's own predictions, written
             // beside the deliverable AFTER it exists. A sidecar write failure is a warning,
             // never a failed export (honesty over rollback — the deliverable is already real).
             std::string sidecarPath;
@@ -3689,13 +3750,14 @@ void registerSpatialTools(ToolRegistry& reg) {
                      {"bedChannels", bedCh}, {"objectCount", (int)m.objects.size()},
                      {"objectMetadataCount", objectMetadataCount},
                      {"coordinateMode", reportedCoordMode}, {"objects", objReport},
-                     {"profile", profileJson},
+                     {"profile", profileJson}, {"dolbyMetadataChunk", dolbyMetaMode},
                      {"adm", pr.ok ? pr.summary : Json(nullptr)}, {"warnings", warnings}};
             if (wantIntent)
                 ret["intentSidecarPath"] = sidecarPath.empty() ? Json(nullptr) : Json(sidecarPath);
             return ret;
 #else
             (void)coord; (void)blockMs; (void)maxBlocks; (void)boundsFlag; (void)bitDepth;
+            (void)wantDbmd; (void)dolbyMetaMode;
             Json objReport = Json::array();
             for (size_t j = 0; j < objTracks.size(); ++j)
                 objReport.push_back(Json{{"track", objTracks[j]}, {"name", "Object " + std::to_string(j + 1)},
@@ -4039,7 +4101,7 @@ void registerSpatialTools(ToolRegistry& reg) {
 #endif
         }});
 
-    // ---- spatial.export_loom_manifest — the Inseglet -> iamf-loom bridge ------------
+    // ---- spatial.export_loom_manifest — the Inseglet -> iamf-loom bridge (doc 107 §6-P2) ------------
     reg.add(Tool{
         "spatial.export_loom_manifest",
         "Export the session's immersive program as an iamf-loom package source: render the bed and/or "
@@ -4468,7 +4530,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                 if (!os) return makeError("file_write_failed", "error writing " + seasonPath, "");
             }
 
-            // ---- intent sidecar (B1 R2): predictions for the bed/scene stems this
+            // ---- intent sidecar (B1 R2, doc 124): predictions for the bed/scene stems this
             // call just rendered; VO stems carry no claims in v0 (absent block = absent claim).
             // A sidecar write failure is a warning, never a failed export.
             std::string sidecarPath;
@@ -4812,6 +4874,241 @@ void registerSpatialTools(ToolRegistry& reg) {
                         {"inputs", inputs}, {"constraints", consJson},
                         {"note", "host build: representative roster (no REAPER routing)"}};
 #endif
+        }});
+
+    // ---- spatial.inject_identity_tones — B4 channel-identity QC, author half (doc 135) ----------
+    reg.add(Tool{
+        "spatial.inject_identity_tones",
+        "Lay a unique identifier sine on every channel (or every listed track) so any downstream "
+        "routing fault is measurable, then verify it with analysis.verify_routing. This is the "
+        "iamf-adm-corpus's spectral-identity method brought into the session: slot k carries "
+        "313 + 139*k Hz (LFE slots carry 40 Hz), -18 dBFS, 2 s at 48 kHz by default — non-harmonic "
+        "tones with no shared partials, so a swap, a drop, a duplicate or a few dB of bleed each "
+        "leave a distinct signature. mode=channels writes ONE multichannel WAV and places it on "
+        "`track` (verifies bed channel order); mode=tracks writes one MONO WAV per entry in "
+        "`tracks` (verifies per-object send routing — the routing you cannot see from the mixer). "
+        "Pass bedLayout to fill channels + LFE indices + speaker labels from the standard bed "
+        "table, or give channels/lfeChannels/labels directly. The response echoes `lfeChannels` "
+        "and `channels` — hand them straight to analysis.verify_routing so both halves judge the "
+        "SAME plan. place:false (or a host build without the placement API) writes the WAVs and "
+        "reports placed:false with their paths rather than pretending to have placed them; "
+        "dryRun:true returns the plan and writes nothing. Tone material is deterministic (phase 0, "
+        "no dither), so re-running produces byte-identical WAVs. NB this authors QC material, not "
+        "programme material — remove or mute the items before rendering a deliverable.",
+        jparse(R"({"type":"object","properties":{
+            "mode":{"type":"string","enum":["channels","tracks"],"default":"channels"},
+            "track":{"type":"integer","minimum":0},
+            "tracks":{"type":"array","items":{"type":"integer","minimum":0}},
+            "bedLayout":{"type":"string","enum":["5.1","7.1","7.1.2","7.1.4","9.1.6","22.2"]},
+            "channels":{"type":"integer","minimum":1,"maximum":128},
+            "lfeChannels":{"type":"array","items":{"type":"integer","minimum":0}},
+            "labels":{"type":"array","items":{"type":"string"}},
+            "position":{"type":"number","minimum":0,"default":0},
+            "durationSec":{"type":"number","minimum":0.1,"default":2.0},
+            "levelDb":{"type":"number","default":-18.0},
+            "sampleRate":{"type":"integer","minimum":8000,"default":48000},
+            "bitDepth":{"type":"integer","enum":[16,24],"default":24},
+            "outDir":{"type":"string"},
+            "place":{"type":"boolean","default":true},
+            "dryRun":{"type":"boolean","default":false}},
+            "additionalProperties":false})"),
+        jparse(R"({"type":"object","properties":{
+            "ok":{"type":"boolean"},"dryRun":{"type":"boolean"},"mode":{"type":"string"},
+            "channels":{"type":"integer"},"lfeChannels":{"type":"array"},
+            "sampleRate":{"type":"integer"},"durationSec":{"type":"number"},
+            "levelDb":{"type":"number"},"bitDepth":{"type":"integer"},"frames":{"type":"integer"},
+            "plan":{"type":"array"},"wavs":{"type":"array"},"placed":{"type":"boolean"},
+            "items":{"type":"array"},"outDir":{"type":"string"},"next":{"type":"string"},
+            "warnings":{"type":"array","items":{"type":"string"}},"note":{"type":"string"},
+            "error":{"type":"string"},"detail":{"type":"string"},"remediation":{"type":"string"}}})"),
+        ToolAnnotations{/*readOnly*/ false, /*destructive*/ false, /*idempotent*/ false},
+        Profile::Spatial,
+        [](const Json& a) -> Json {
+            namespace it = idtone;
+            const std::string mode = optStr(a, "mode", "channels");
+            const bool dryRun = optBool(a, "dryRun", false);
+            const bool wantPlace = optBool(a, "place", true);
+            const double durSec = optNum(a, "durationSec", it::kDefaultDurSec);
+            const double levelDb = optNum(a, "levelDb", it::kDefaultLevelDb);
+            const int rate = optInt(a, "sampleRate", it::kDefaultRate);
+            int bitDepth = optInt(a, "bitDepth", 24);
+            if (bitDepth != 16 && bitDepth != 24) bitDepth = 24;
+            const double position = optNum(a, "position", 0.0);
+            std::vector<std::string> warnings;
+
+            // ---- resolve the plan shape (SDK-independent) ----
+            int nSlots = 0;
+            std::vector<int> lfeIdx;
+            std::vector<std::string> labels;
+            std::vector<int> trackList;
+            const std::string bedLayout = optStr(a, "bedLayout", "");
+
+            if (mode == "tracks") {
+                if (a.contains("tracks") && a["tracks"].is_array())
+                    for (const auto& v : a["tracks"])
+                        if (v.is_number()) trackList.push_back(v.get<int>());
+                if (trackList.empty())
+                    return makeError("mode=tracks needs a non-empty tracks[]",
+                                     "one tone is assigned per listed track, in order",
+                                     "pass tracks:[0,1,2] (or use mode=channels for a bed)");
+                nSlots = (int)trackList.size();
+                if (!bedLayout.empty())
+                    warnings.push_back("bedLayout is ignored in mode=tracks (no LFE slot concept)");
+            } else {
+                if (!bedLayout.empty()) {
+                    const BedLayout* b = findBedLayout(bedLayout);
+                    if (!b) return makeError("unknown bedLayout: " + bedLayout,
+                                             "bedLayout must be one of the standard bed widths",
+                                             "use 5.1 / 7.1 / 7.1.2 / 7.1.4 / 9.1.6 / 22.2");
+                    nSlots = b->channels;
+                    lfeIdx = b->lfe;
+                    for (int i = 0; i < b->channels; ++i) labels.push_back(b->labels[(size_t)i]);
+                } else {
+                    nSlots = optInt(a, "channels", 0);
+                }
+            }
+            // explicit overrides win over the table, so a non-standard roster is still expressible
+            if (a.contains("channels") && a["channels"].is_number() && mode != "tracks")
+                nSlots = a["channels"].get<int>();
+            if (a.contains("lfeChannels") && a["lfeChannels"].is_array()) {
+                lfeIdx.clear();
+                for (const auto& v : a["lfeChannels"]) if (v.is_number()) lfeIdx.push_back(v.get<int>());
+            }
+            if (a.contains("labels") && a["labels"].is_array()) {
+                labels.clear();
+                for (const auto& v : a["labels"]) if (v.is_string()) labels.push_back(v.get<std::string>());
+            }
+            if (nSlots <= 0)
+                return makeError("no channel count to plan for",
+                                 "mode=channels needs channels or bedLayout",
+                                 "pass bedLayout:\"7.1.4\", or channels:12");
+            if (nSlots > idtone::kMaxSlots)
+                return makeError("channels exceeds the 128-channel REAPER cap",
+                                 "requested " + std::to_string(nSlots) + " slots",
+                                 "reduce channels to 128 or fewer");
+            for (int L : lfeIdx)
+                if (L < 0 || L >= nSlots)
+                    return makeError("lfeChannels entry out of range",
+                                     "index " + std::to_string(L) + " is not a channel of " +
+                                         std::to_string(nSlots),
+                                     "LFE indices are 0-based and below the channel count");
+
+            const it::Plan plan =
+                it::makePlan(nSlots, lfeIdx, labels, rate, durSec, levelDb, /*lfeRule*/ true);
+
+            Json planJson = Json::array();
+            for (const auto& s : plan.slots)
+                planJson.push_back(Json{{"slot", s.index}, {"hz", s.hz}, {"lfe", s.lfe},
+                                        {"label", s.label}});
+            Json lfeJson = Json::array();
+            for (int L : lfeIdx) lfeJson.push_back(L);
+
+            Json base{{"mode", mode}, {"channels", nSlots}, {"lfeChannels", lfeJson},
+                      {"sampleRate", rate}, {"durationSec", durSec}, {"levelDb", levelDb},
+                      {"bitDepth", bitDepth}, {"frames", (int)plan.frames()}, {"plan", planJson}};
+
+            if (dryRun) {
+                base["ok"] = true;
+                base["dryRun"] = true;
+                base["placed"] = false;
+                base["wavs"] = Json::array();
+                base["warnings"] = warnings;
+                base["note"] = "dryRun: plan only, nothing written";
+                return base;
+            }
+
+            // ---- author the WAVs (SDK-independent — writing files needs no REAPER) ----
+            std::string outDir = optStr(a, "outDir", "");
+            std::error_code ec;
+            if (outDir.empty()) {
+                std::filesystem::path d = std::filesystem::temp_directory_path(ec);
+                if (ec) d = std::filesystem::path(".");
+                outDir = (d / "insg_identity_tones").string();
+            }
+            std::filesystem::create_directories(outDir, ec);
+
+            const auto chans = it::renderPlan(plan);
+            std::vector<std::string> paths;
+            auto writeWav = [&](const std::vector<std::vector<float>>& c,
+                                const std::string& name) -> bool {
+                const std::string bytes = loomb::writeWavPcm(c, plan.frames(), rate, bitDepth);
+                const std::string p = (std::filesystem::path(outDir) / name).string();
+                std::ofstream f(p, std::ios::binary);
+                if (!f) return false;
+                f.write(bytes.data(), (std::streamsize)bytes.size());
+                paths.push_back(p);
+                return true;
+            };
+
+            if (mode == "tracks") {
+                for (int k = 0; k < nSlots; ++k) {
+                    std::vector<std::vector<float>> one{chans[(size_t)k]};
+                    if (!writeWav(one, "insg_tone_" + std::to_string(k) + ".wav"))
+                        return makeError("could not write the tone WAV",
+                                         "outDir = " + outDir,
+                                         "pass an outDir the process can write to");
+                }
+            } else {
+                if (!writeWav(chans, "insg_tones_" + std::to_string(nSlots) + "ch.wav"))
+                    return makeError("could not write the tone WAV", "outDir = " + outDir,
+                                     "pass an outDir the process can write to");
+            }
+
+            Json wavs = Json::array();
+            for (const auto& p : paths) wavs.push_back(p);
+            base["wavs"] = wavs;
+            base["outDir"] = outDir;
+
+            bool placed = false;
+            Json items = Json::array();
+#ifdef REAPER_MCP_HAVE_SDK
+            if (wantPlace) {
+                // Fail CLOSED: if the placement API is unavailable we still report the WAVs.
+                if (!PCM_Source_CreateFromFile || !SetMediaItemTake_Source) {
+                    warnings.push_back("this REAPER build did not export PCM_Source_CreateFromFile / "
+                                       "SetMediaItemTake_Source — WAVs written, nothing placed");
+                } else {
+                    Undo_BeginBlock2(kCur);
+                    bool anyFail = false;
+                    for (size_t i = 0; i < paths.size(); ++i) {
+                        const int trackIdx = (mode == "tracks") ? trackList[i] : optInt(a, "track", 0);
+                        MediaTrack* t = GetTrack(kCur, trackIdx);
+                        if (!t) { anyFail = true;
+                                  warnings.push_back("track " + std::to_string(trackIdx) +
+                                                     " does not exist; its tone was not placed");
+                                  continue; }
+                        MediaItem* item = AddMediaItemToTrack(t);
+                        MediaItem_Take* take = item ? AddTakeToMediaItem(item) : nullptr;
+                        PCM_source* src = PCM_Source_CreateFromFile(paths[i].c_str());
+                        if (!item || !take || !src) { anyFail = true;
+                                                      warnings.push_back("could not create the item/take/source for " +
+                                                                         paths[i]);
+                                                      continue; }
+                        SetMediaItemTake_Source(take, src);
+                        SetMediaItemInfo_Value(item, "D_POSITION", position);
+                        SetMediaItemInfo_Value(item, "D_LENGTH", durSec);
+                        items.push_back(Json{{"track", trackIdx}, {"position", position},
+                                             {"length", durSec}, {"source", paths[i]}});
+                    }
+                    Undo_EndBlock2(kCur, "MCP: inject identity tones", -1);
+                    UpdateArrange();
+                    placed = !items.empty() && !anyFail;
+                }
+            }
+#else
+            if (wantPlace)
+                warnings.push_back("host build (no REAPER SDK): WAVs authored, items not placed");
+            (void)position;
+#endif
+            base["ok"] = true;
+            base["dryRun"] = false;
+            base["placed"] = placed;
+            base["items"] = items;
+            base["warnings"] = warnings;
+            base["next"] = "analysis.verify_routing with channels=" + std::to_string(nSlots) +
+                           " and the lfeChannels echoed above";
+            base["note"] = "identity tones: 313 + 139*k Hz (LFE 40 Hz), the iamf-adm-corpus plan";
+            return base;
         }});
 }
 

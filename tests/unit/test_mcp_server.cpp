@@ -1957,12 +1957,15 @@ int main() {
         json lr = rpc(cli, cfg.token, lreq);
         check(lr.contains("result"), "prompts/list has result");
         const json& prompts = lr["result"]["prompts"];
-        check(prompts.is_array() && prompts.size() == 4, "prompts/list returns the 4 expert workflows");
+        // Doc 141: 4 -> 5. The fifth prompt (author_dolby_adm) sorts FIRST, so every index moves.
+        // This pin and test_prompts.cpp:40's are the two that had to move in the same commit.
+        check(prompts.is_array() && prompts.size() == 5, "prompts/list returns the 5 expert workflows");
         // std::map -> deterministic alphabetical order.
-        check(prompts[0].value("name", "") == "deliver_to_iamf", "prompt[0] = deliver_to_iamf");
-        check(prompts[1].value("name", "") == "encode_to_ambisonics", "prompt[1] = encode_to_ambisonics");
-        check(prompts[2].value("name", "") == "master_for_delivery", "prompt[2] = master_for_delivery");
-        check(prompts[3].value("name", "") == "setup_atmos_session", "prompt[3] = setup_atmos_session");
+        check(prompts[0].value("name", "") == "author_dolby_adm", "prompt[0] = author_dolby_adm");
+        check(prompts[1].value("name", "") == "deliver_to_iamf", "prompt[1] = deliver_to_iamf");
+        check(prompts[2].value("name", "") == "encode_to_ambisonics", "prompt[2] = encode_to_ambisonics");
+        check(prompts[3].value("name", "") == "master_for_delivery", "prompt[3] = master_for_delivery");
+        check(prompts[4].value("name", "") == "setup_atmos_session", "prompt[4] = setup_atmos_session");
         bool sawRequired = false, sawTitle = false, sawOutDir = false;
         for (const auto& p : prompts) {
             check(p.contains("description") && p["arguments"].is_array(), "prompt has description+arguments");
@@ -2303,7 +2306,7 @@ int main() {
               "analysis.adm_profile_check on a missing file returns file_not_found");
     }
 
-    // --- 2l''. B1 R1/R2: the intentSidecar param on both export verbs -----------------
+    // --- 2l''. B1 R1/R2 (doc 124): the intentSidecar param on both export verbs -----------------
     // Host build: the param flows through and the response echoes the planned sidecar path; the
     // emitter itself is proven in unit.intent_sidecar. Negative control: without the param the
     // response carries NO intentSidecarPath key (additive surface only).

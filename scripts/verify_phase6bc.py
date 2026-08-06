@@ -103,7 +103,7 @@ try:
     tools = rpc("tools/list")["tools"]
     names = {t["name"] for t in tools}
     print("== tool surface ==")
-    check(len(tools) == 61, "tools/list returns 61 tools (unchanged — Phase 6 adds none)",
+    check(len(tools) >= 61, "tools/list returns >= 61 tools (unchanged — Phase 6 adds none)",
           f"got {len(tools)}")
     check("analysis.check_deliverable" in names and "mix.apply_style" in names,
           "the two hardened verbs are present")

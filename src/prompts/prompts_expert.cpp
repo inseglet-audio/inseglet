@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 James Livingston
 
-// prompts_expert.cpp — the 4 expert-workflow MCP prompts.
+// prompts_expert.cpp — the 5 expert-workflow MCP prompts.
 //
 // Each prompt is a declarative, client-visible template that steers an agent to drive the
 // semantic verbs in the right order for a common immersive outcome, so a non-expert user gets an
@@ -14,6 +14,9 @@
 //   deliver_to_iamf       -> spatial.export_loom_manifest      (bed/scene/VO stems + a
 //                                                                ready-to-compile iamf-loom manifest,
 //                                                                validated downstream by iamf-sentinel)
+//   author_dolby_adm      -> spatial.export_adm                (an ADM BWF whose OBJECTS survive
+//                                                                iamf-tools' importer — the worked
+//                                                                example for dolbyMetadataChunk)
 //
 // Pure data + deterministic render(); no REAPER API. Every verb these templates steer toward is
 // implemented, and the whole flow is reproducible as a session.run_dsl macro. The loudness/true-peak
@@ -164,6 +167,49 @@ std::vector<PromptMessage> renderDeliverToIamf(const Json& args) {
     return {PromptMessage{"user", t}};
 }
 
+// author_dolby_adm — the worked example for spatial.export_adm's dolbyMetadataChunk switch.
+// Its whole reason to exist: the switch is opt-in, and an opt-in nobody discovers does not exist.
+// The template makes the agent state the trade BEFORE taking it, because taking it is a provenance
+// assertion, not a formatting choice.
+std::vector<PromptMessage> renderAuthorDolbyAdm(const Json& args) {
+    const std::string bed = argStr(args, "bed", "7.1.2");
+    const std::string objects = argStr(args, "objects", "");
+    const std::string outPath = argStr(args, "outPath", "");
+    std::string t;
+    t = "Author an ADM (ITU-R BS.2076) Broadcast-Wave from this session whose OBJECTS survive "
+        "ingest by iamf-tools' ADM importer, using spatial.export_adm. Bed layout: " + bed + ". ";
+    t += objects.empty() ? "Use the session's object tracks (ask me which if it is ambiguous). "
+                         : ("Object tracks: " + objects + ". ");
+    if (!outPath.empty()) t += "Write it to " + outPath + ". ";
+    t += "\n\n";
+    t += "1. Start with dryRun:true and bedLayout \"" + bed + "\". Read back the planned channel "
+         "count, the object roster and every entry in `warnings` — do not skip them, one of them is "
+         "the point of this workflow.\n";
+    t += "2. You will see an advisory saying the export carries dynamic objects but no `dbmd` "
+         "chunk, so that importer takes its DEFAULT path, rejects every audioObject as \"Not under "
+         "common definition\" and fails the encode outright — no IAMF file at all, not a bed-only "
+         "one. That is a fact about ONE consumer (iamf-tools, as measured on the date the advisory "
+         "names), not a defect in the file: a certified Dolby or EBU renderer ingests the default "
+         "export fine.\n";
+    t += "3. Set dolbyMetadataChunk:\"placeholder\" ONLY after telling me, in one sentence, what it "
+         "costs: it emits a placeholder `dbmd` chunk AND renames the bed channels to Dolby's "
+         "RoomCentric* vocabulary, which together ASSERT the file is a Dolby ADM deliverable. That "
+         "assertion is the caller's to make, which is exactly why it is not the default.\n";
+    t += "4. The switch FAILS CLOSED and will refuse rather than write a file the importer rejects "
+         "outright: it needs 24-bit PCM, a 48 kHz or 96 kHz render, and a bed of 5.1, 7.1 or 7.1.2. "
+         "7.1.4, 9.1.6 and 22.2 have NO accepted Dolby pack layout — if I asked for one of those, "
+         "say so plainly and offer to route the height channels as objects instead of silently "
+         "downgrading my bed.\n";
+    t += "5. Re-issue without dryRun, then verify the result with analysis.adm_inspect: the chunk "
+         "list must now read fmt /dbmd/chna/axml/data, and the advisory must be GONE from "
+         "`warnings`. Report both — the absence of the warning is the evidence, not my say-so.\n";
+    t += "6. Ingest-verify against a certified renderer before you call the deliverable good. This "
+         "workflow makes a file one open-source importer accepts; that is not the same claim as "
+         "Dolby Atmos conformance. For the latter run analysis.adm_profile_check, and note it does "
+         "NOT require a `dbmd` — the two checks are independent and neither implies the other.\n";
+    return {PromptMessage{"user", t}};
+}
+
 }  // namespace
 
 void registerExpertPrompts(PromptRegistry& reg) {
@@ -209,6 +255,19 @@ void registerExpertPrompts(PromptRegistry& reg) {
          PromptArg{"sceneOrder", "Ambisonic scene order 1-4, or 0 for no scene (default 0)", false},
          PromptArg{"target", "Delivery target: iamf, mp4, or preview; presets youtube / archive (default iamf)", false}},
         renderDeliverToIamf});
+
+    reg.add(Prompt{
+        "author_dolby_adm",
+        "Author an ADM BWF whose objects survive IAMF ingest",
+        "Author an ITU-R BS.2076 ADM Broadcast-Wave via spatial.export_adm and, deliberately, take "
+        "its dolbyMetadataChunk opt-in — a placeholder `dbmd` chunk plus RoomCentric* bed names — so "
+        "iamf-tools' ADM importer keeps the objects instead of dropping them. States what the "
+        "opt-in asserts before taking it, and verifies the result with analysis.adm_inspect.",
+        {PromptArg{"bed", "Bed layout: 5.1, 7.1 or 7.1.2 (default 7.1.2 — larger beds have no "
+                          "accepted Dolby pack layout)", false},
+         PromptArg{"objects", "Object track indices or names (default: ask)", false},
+         PromptArg{"outPath", "Where to write the .wav (default: the project directory)", false}},
+        renderAuthorDolbyAdm});
 }
 
 }  // namespace reaper_mcp

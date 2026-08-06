@@ -6,6 +6,82 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.8.0] — 2026-08-06
+
+Feature release: **IAMF ingest** — an Inseglet ADM export is now accepted by
+[iamf-tools](https://github.com/AOMediaCodec/iamf-tools) — plus in-DAW channel-identity QC and an
+FX-parameter authoring seam. Surface **190 tools / 3 resources / 5 prompts** (was 187 / 3 / 4);
+unit suite 23 → 27.
+
+### Added
+
+- **`spatial.export_adm` gains `dolbyMetadataChunk` — the opt-in `dbmd` chunk that lets an
+  export's objects survive IAMF ingest.** `"none"` (the default) is **byte-identical to the
+  previous writer**; `"placeholder"` emits a 32-byte `dbmd` after `fmt ` and before `chna` **and**
+  renames the bed to Dolby's `RoomCentric*` vocabulary — one switch, because the consumer makes
+  them one: iamf-tools reads the chunk's *existence* only, that existence selects its Dolby
+  validation path, and only that path consults channel names at all. Without a `dbmd` the importer
+  takes its default path, rejects every `audioObject` as "Not under common definition" and **fails
+  the encode with "No audioObject present" — no IAMF file is produced at all**, not even a bed-only
+  one (measured 2026-08-06 against iamf-tools `main` `19019e3`; certified Dolby/EBU renderers are
+  unaffected and ingest either form). **Independent of `profile`** — `profile:"dolby-atmos"` still
+  emits no `dbmd`. **Fails closed**, with the remedy named, on every combination that consumer
+  rejects: bit depth ≠ 24 and sample rate ∉ {48 kHz, 96 kHz} (both refused at the *reader*, before
+  any metadata is parsed, so taking the switch unguarded would be worse than declining it), and any
+  bed outside **5.1 / 7.1 / 7.1.2**, because the importer's pack-layout check is an allow-list of
+  eight *ordered* layout strings — a legal channel-name set is necessary but not sufficient. Taking
+  the switch **asserts the file is a Dolby ADM deliverable**, so a runtime advisory discloses the
+  trade on four surfaces — `spatial.export_adm`, `analysis.adm_inspect`,
+  `analysis.adm_profile_check` (in `warnings`, deliberately not `violations`: the Atmos profile
+  does not require a `dbmd`) and a new fifth prompt `author_dolby_adm` — firing only when objects
+  are present *and* the switch is off, because a hint that always fires gets filtered. Prompts
+  **4 → 5**; tool surface unchanged at 190 — a parameter is not a verb. ⚠️ The advisory is a claim
+  about third-party software: it carries its measurement date, because upstream is actively
+  reworking this importer.
+
+- **`envelope.ensure_fx_envelope` — the FX-parameter authoring seam.** `envelope.add_point` could
+  only write to an *already-active* envelope, and `autoActivate` reaches only REAPER's built-in
+  track envelopes; FX-parameter envelopes need the FX + parameter context. This verb ensures the
+  envelope exists and returns the **name** `add_point` looks up. Address the parameter by index or
+  by name — resolution is tiered (exact → case-insensitive → substring) and an **ambiguous request
+  is refused and names its candidates** rather than picking one, so `paramName:"Angle"` on an IEM
+  encoder reports all three Angle parameters instead of silently automating azimuth. Reports
+  `addPointSafe`: when two FX on a track expose an identically-named parameter the envelope name
+  does not identify one envelope. Idempotent. Surface **189 → 190 tools**.
+
+- **In-DAW channel-identity QC — `spatial.inject_identity_tones` + `analysis.verify_routing`.**
+  The first lays a unique identifier sine per bed channel or object track (313 + 139·k Hz, LFE
+  40 Hz, −18 dBFS); the second reads any downstream point — an external or rendered WAV, or a
+  render-free track accessor — and reports which tone actually arrived on each channel: identity /
+  swapped / duplicated / dropped / bleed / silent, each with a measured `marginDb` and
+  `planCoverage`. Catches swapped, dropped and duplicated channels and inter-channel bleed inside
+  the session, before export, and independently verifies the send encodings. Surface
+  **187 → 189 tools** (spatial 23 → 24, analysis 18 → 19).
+
+### Fixed
+
+- **ADM `audioObject` emission order — `spatial.export_adm` output is no longer refused by
+  iamf-tools' ADM importer.** The writer emitted each object as `audioObject` → `audioPackFormat` →
+  `audioChannelFormat` (whose blocks carry `<gain>`) → *next* `audioObject`. That importer sets its
+  `gain` tag for **any** element named `gain` without checking the parent, and registers no
+  end-element handler, so the tag latches and `parent` is never reset; an `<audioObject>` starting
+  while the tag is live makes it parse our indentation as a gain and refuse the whole file with
+  `INVALID_ARGUMENT: Failed to parse gain`. The failure is a **conjunction** of element order and
+  inter-element whitespace — neither alone triggers it — and is invariant to the gain value,
+  position format, coordinate mode and `dbmd`, which is why it resisted diagnosis. Every
+  `audioObject` is now emitted before any `audioChannelFormat`. **No emitted byte changed** — only
+  the order in which the three groups are joined; ids, IDRefs and `audioTrackUID` numbering are
+  untouched.
+
+### Changed
+
+- **Live-gate surface checks assert a floor, not an equality.** Each `scripts/verify_*.py` gate
+  pinned the absolute tool count as of the beat that wrote it, so every earlier gate failed its
+  first check against any later build. The count only ever supported a floor — the gate's real
+  claim, that its own verbs are on the wire, is asserted by name on the following lines — and a
+  floor still catches the failure these gates exist to catch: running one against an *older*
+  installed binary than it needs.
+
 ## [1.7.0] — 2026-08-05
 
 Feature release: the authoring-side intent sidecar + representation-aware positioning.

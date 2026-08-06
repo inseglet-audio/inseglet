@@ -1,11 +1,26 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.5.0
+@version 1.8.0
 @author James Livingston
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  First public macOS release. In-process MCP server (Streamable HTTP + SSE, MCP 2025-06-18);
-  186 tools / 3 resources / 3 prompts; immersive/spatial audio differentiator (ADM BWF +
-  Dolby Atmos Master File authoring, bed/object send-layout orchestration, decode-coverage
-  timelines, immersive metering, binaural + live head-tracking).
+  IAMF ingest + in-DAW QC (190 tools / 3 resources / 5 prompts; was 187 / 3 / 4).
+  spatial.export_adm now emits every audioObject before any audioChannelFormat, fixing a
+  whole-file rejection by iamf-tools' ADM importer ("Failed to parse gain") — v1.7.0 exports
+  were refused outright. No emitted byte changed, only the order the three groups are joined.
+  New dolbyMetadataChunk:"placeholder" (default "none", and INDEPENDENT of profile) emits a
+  placeholder `dbmd` chunk AND renames the bed to Dolby's RoomCentric* vocabulary — one switch,
+  because a consumer only reads those names when a `dbmd` is present — so the importer keeps the
+  objects instead of failing the encode with "No audioObject present". It fails closed, with the
+  remedy named, on non-24-bit, a rate outside {48k, 96k}, or a bed outside 5.1 / 7.1 / 7.1.2, and
+  a runtime advisory discloses the trade on four surfaces. New author_dolby_adm prompt (5th).
+  spatial.inject_identity_tones + analysis.verify_routing: in-DAW channel-identity QC. A unique
+  tone per bed channel or object track (313 + 139k Hz, LFE 40 Hz, -18 dBFS) read back from a
+  rendered WAV or a render-free track accessor, reporting identity / swapped / duplicated /
+  dropped / bleed / silent per channel with a measured margin — catches the routing fault class
+  inside the session, before export, and independently verifies Inseglet's own send encodings.
+  envelope.ensure_fx_envelope: ensures an FX-parameter envelope exists and returns the name
+  envelope.add_point looks up (add_point could only write to an already-active envelope, and
+  autoActivate reaches only REAPER's built-in track envelopes). Tiered parameter resolution that
+  refuses an ambiguous request by naming its candidates instead of silently picking one.
 @link https://github.com/inseglet-audio/inseglet

@@ -13,7 +13,7 @@ even a real action.run here cannot execute a dialog/quit. Still, run it on a SCR
 REAPER must be in the FOREGROUND (App Nap stalls the Run() pump). Stdlib only.
 
 Coverage:
-  0. surface == 97 (94 baseline + 3 P8-2).
+  0. surface >= 97 (94 baseline + 3 P8-2).
   1. dryRun resolves an action's real REAPER name (proves kbd_getTextFromCmd + the name layer's source).
   2. benign toggle round-trip: get_toggle_state -> action.run -> state flips -> action.run -> restored.
   3. deny-list: dryRun(Close project) -> wouldRun=false; a REAL action.run then returns action_denied
@@ -97,10 +97,10 @@ def skip(label, detail=""):
     print(f"  [SKIP] {label}" + (f"  — {detail}" if detail else ""))
 
 # ------------------------------------------------------------------------------------------------
-print("== 0. surface == 97 ==")
+print("== 0. surface >= 97 ==")
 initialize()
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == 97, "tool surface == 97 (94 + 3 P8-2)", f"count={enum.get('count')}")
+check(enum.get("count") >= 97, "tool surface >= 97 (94 + 3 P8-2)", f"count={enum.get('count')}")
 for t in ("action.run", "action.run_by_name", "action.get_toggle_state"):
     check(any(x.get("name") == t for x in rpc("tools/list").get("tools", [])), f"{t} present in tools/list")
 

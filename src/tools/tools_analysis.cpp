@@ -43,8 +43,9 @@
 #include "../render_stems.h"     // shared bounded stem-render helpers (temp render + sample read-back)
 #include "../deliverable_specs.h"// the named deliverable specs + the pure pass/fail evaluator
 #include "../ambisonic_meter.h"  // metering DSP (WAV read + per-channel + ambisonic field)
-#include "../bed_weights.h"     // SMPTE bed labels + BS.1770-4 channel weights (F33)
+#include "../bed_weights.h"     // SMPTE bed labels + BS.1770-4 channel weights (doc 117 / F33)
 #include "../audio_accessor.h"   // render-free direct sample reads (accessor -> meter::AudioBuffer)
+#include "../identity_tones.h"   // B4 (doc 135): the corpus tone plan + Goertzel routing detector
 #include "../adm_bwf.h"          // ADM (BS.2076) parse + summarize for analysis.adm_inspect
 #include "../adm_profile.h"      // Dolby Atmos Master ADM Profile conformance validator
 #include "../damf.h"             // DAMF triad parse + summarize for analysis.damf_inspect
@@ -2174,6 +2175,14 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                  "not a readable WAV / BW64 file", "check the path points at a WAV/BWF");
             Json out = pr.summary;
             out["path"] = resolved;
+            // Report the `dbmd` ingest advisory alongside the chunk list it is about. Appended to
+            // the parser's own warnings, so a caller reading warnings[] sees structural problems
+            // and this disclosure in one place.
+            if (const std::string adv = adm::dolbyIngestAdvisory(out); !adv.empty()) {
+                if (!out.contains("warnings") || !out["warnings"].is_array())
+                    out["warnings"] = Json::array();
+                out["warnings"].push_back(adv);
+            }
             return out;
         }});
 
@@ -2199,7 +2208,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "profile":{"type":"string"},"conformant":{"type":"boolean"},
             "violations":{"type":"array"},"noteCount":{"type":"integer"},"notes":{"type":"array"},
             "adm":{"type":["object","null"]},"format":{"type":"object"},"isAdm":{"type":"boolean"},
-            "path":{"type":"string"},
+            "path":{"type":"string"},"warnings":{"type":"array","items":{"type":"string"}},
             "error":{"type":"string"},"detail":{"type":"string"},"remediation":{"type":"string"}}})"),
         ToolAnnotations{/*readOnly*/ true, /*destructive*/ false, /*idempotent*/ true},
         Profile::Analysis,
@@ -2229,6 +2238,16 @@ void registerAnalysisTools(ToolRegistry& reg) {
             out["isAdm"] = pr.summary["isAdm"];
             out["format"] = pr.summary["format"];
             out["adm"] = pr.summary["adm"];
+            // The `dbmd` ingest advisory rides in 'warnings', DELIBERATELY NOT in 'violations' or
+            // 'notes'. The Dolby Atmos Master ADM Profile does not require a `dbmd` chunk, and this
+            // tool's job is conformance to that published profile — a missing `dbmd` is an ingest
+            // fact about one consumer, not a profile violation. Filing it as one would silently
+            // move a pinned behaviour (batch O3: the profile's chunk list is fmt /chna/axml/data).
+            Json warnings = Json::array();
+            if (const std::string adv = adm::dolbyIngestAdvisory(pr.summary); !adv.empty())
+                warnings.push_back(adv + " NB this is an ingest note, NOT a profile violation — the "
+                                         "Dolby Atmos Master ADM Profile does not require a `dbmd`.");
+            out["warnings"] = warnings;
             return out;
         }});
 
@@ -3094,6 +3113,135 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"count", (int)objJson.size()}, {"boundsFlag", boundsFlag}, {"window", window},
                         {"objects", objJson}, {"measuredSource", measuredSource},
                         {"interpretation", topInterp}, {"warnings", warnings}};
+        }});
+
+    // ---- analysis.verify_routing — B4 channel-identity QC, read-only half (doc 135) -------------
+    reg.add(Tool{
+        "analysis.verify_routing",
+        "Read a point in the signal path and report which identifier tone actually arrived on each "
+        "channel — the read-only counterpart to spatial.inject_identity_tones, and a general "
+        "routing verifier that works on any pipeline, not just an immersive one. Give it a WAV "
+        "(an external file or a rendered stem) via `path`, or a live track via `track` for a "
+        "render-free audio-accessor read. Detection is Goertzel at the plan's own frequencies "
+        "(313 + 139*k Hz, LFE 40 Hz), so it is exact for the known tone set and reports a MEASURED "
+        "margin rather than a guess: each channel comes back as identity / swapped / duplicated / "
+        "dropped / bleed / silent, with marginDb (its own tone versus the strongest other tone) "
+        "and planCoverage (how much of the channel that tone actually is). ok=true means every "
+        "channel carried its own tone with at least minMarginDb of separation — a clean identity "
+        "map. A swap names its partner, a duplicate names the other carrier, and bleed names the "
+        "interfering slot, so the report says what to fix and where. Pass the channels and "
+        "lfeChannels that spatial.inject_identity_tones echoed, so both halves judge the same "
+        "plan; a channel-count mismatch is a refusal, never a verdict.",
+        jparse(R"({"type":"object","properties":{
+            "path":{"type":"string"},
+            "track":{"type":"integer","minimum":0},
+            "channels":{"type":"integer","minimum":1,"maximum":128},
+            "lfeChannels":{"type":"array","items":{"type":"integer","minimum":0}},
+            "labels":{"type":"array","items":{"type":"string"}},
+            "minMarginDb":{"type":"number","default":40.0},
+            "silenceDb":{"type":"number","default":-80.0},
+            "startSec":{"type":"number","minimum":0,"default":0},
+            "durationSec":{"type":"number","minimum":0}},
+            "additionalProperties":false})"),
+        jparse(R"({"type":"object","properties":{
+            "ok":{"type":"boolean"},"source":{"type":"string"},"path":{"type":"string"},
+            "channels":{"type":"integer"},"sampleRate":{"type":"number"},
+            "frames":{"type":"integer"},"identityCount":{"type":"integer"},
+            "worstMarginDb":{"type":"number"},"minMarginDb":{"type":"number"},
+            "detectedMap":{"type":"array"},"perChannel":{"type":"array"},
+            "findings":{"type":"array"},"summary":{"type":"string"},
+            "warnings":{"type":"array","items":{"type":"string"}},
+            "error":{"type":"string"},"detail":{"type":"string"},"remediation":{"type":"string"}}})"),
+        ToolAnnotations{/*readOnly*/ true, /*destructive*/ false, /*idempotent*/ true},
+        Profile::Analysis,
+        [](const Json& a) -> Json {
+            namespace it = idtone;
+            const std::string path = optStr(a, "path", "");
+            const bool haveTrack = a.contains("track") && a["track"].is_number();
+            if (path.empty() && !haveTrack)
+                return makeError("nothing to read",
+                                 "verify_routing needs either path (a WAV) or track (a live read)",
+                                 "pass path:\"/tmp/stem.wav\" or track:0");
+            if (!path.empty() && haveTrack)
+                return makeError("path and track are mutually exclusive",
+                                 "one read point per call, so the report is unambiguous",
+                                 "pass exactly one of path or track");
+
+            const double minMargin = optNum(a, "minMarginDb", it::kDefaultMinMarginDb);
+            const double silenceDb = optNum(a, "silenceDb", it::kDefaultSilenceDb);
+            const double startSec = optNum(a, "startSec", 0.0);
+            const double durSec = optNum(a, "durationSec", 0.0);
+            std::vector<std::string> warnings;
+
+            meter::AudioBuffer buf;
+            std::string source;
+            if (!path.empty()) {
+                std::string err;
+                if (!meter::readWavFile(path, buf, err))
+                    return makeError("could not read the WAV", err,
+                                     "check the path and that it is PCM WAV/BW64");
+                source = "wav";
+            } else {
+#ifdef REAPER_MCP_HAVE_SDK
+                const int trackIdx = reqInt(a, "track");
+                MediaTrack* t = requireTrack(trackIdx);
+                const int chans = (int)GetMediaTrackInfo_Value(t, "I_NCHAN");
+                AudioAccessor* acc = CreateTrackAudioAccessor(t);
+                if (!acc) return makeError("could not create an audio accessor for that track",
+                                           "track " + std::to_string(trackIdx),
+                                           "the track may have no audio in range");
+                AccessorRead rd;
+                readAccessorWindow(acc, projectSampleRateOr48k(), chans, startSec, durSec, rd);
+                DestroyAudioAccessor(acc);
+                if (!rd.error.empty())
+                    return makeError("accessor read failed", rd.error, rd.remediation);
+                if (rd.clamped) warnings.push_back("the requested window was clamped to the "
+                                                   "accessor's extent");
+                buf = rd.buf;
+                source = "accessor";
+#else
+                return makeError("a live track read needs the REAPER SDK build",
+                                 "host build has no audio accessor",
+                                 "pass path to verify a rendered WAV instead");
+#endif
+            }
+
+            int nSlots = optInt(a, "channels", 0);
+            if (nSlots <= 0) nSlots = buf.channels;   // default: judge the buffer at its own width
+            std::vector<int> lfeIdx;
+            if (a.contains("lfeChannels") && a["lfeChannels"].is_array())
+                for (const auto& v : a["lfeChannels"]) if (v.is_number()) lfeIdx.push_back(v.get<int>());
+            std::vector<std::string> labels;
+            if (a.contains("labels") && a["labels"].is_array())
+                for (const auto& v : a["labels"]) if (v.is_string()) labels.push_back(v.get<std::string>());
+
+            const it::Plan plan = it::makePlan(nSlots, lfeIdx, labels,
+                                               buf.sampleRate > 0 ? (int)buf.sampleRate
+                                                                  : it::kDefaultRate);
+            const it::RoutingReport r = it::detectRouting(buf, plan, minMargin, silenceDb);
+            if (!r.error.empty())
+                return makeError("the buffer and the plan do not agree", r.error,
+                                 "pass the channels/lfeChannels that inject_identity_tones echoed");
+
+            Json per = Json::array();
+            for (const auto& c : r.perChannel)
+                per.push_back(Json{{"channel", c.channel}, {"label", c.label},
+                                   {"expectHz", c.expectHz}, {"detectedSlot", c.detectedSlot},
+                                   {"detectedHz", c.detectedHz}, {"marginDb", c.marginDb},
+                                   {"planCoverage", c.planCoverage}, {"rmsDb", c.rmsDb},
+                                   {"verdict", idtone::verdictName(c.verdict)},
+                                   {"pairedWith", c.pairedWith}, {"note", c.note}});
+            Json dmap = Json::array();
+            for (int m : idtone::detectedMap(r)) dmap.push_back(m);
+            Json finds = Json::array();
+            for (const auto& f : r.findings) finds.push_back(f);
+
+            return Json{{"ok", r.ok}, {"source", source}, {"path", path},
+                        {"channels", r.channels}, {"sampleRate", buf.sampleRate},
+                        {"frames", (int)buf.frames}, {"identityCount", r.identityCount},
+                        {"worstMarginDb", r.worstMarginDb}, {"minMarginDb", r.minMarginDb},
+                        {"detectedMap", dmap}, {"perChannel", per}, {"findings", finds},
+                        {"summary", r.summary}, {"warnings", warnings}};
         }});
 }
 

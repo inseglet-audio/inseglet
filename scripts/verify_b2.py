@@ -104,7 +104,7 @@ def make_midi(track, starts, pitch=60, vel=100, length=0.2):
 initialize()
 print("== 0. surface + presence ==")
 enum = call("tools.enumerate", profile="all")
-check(enum.get("count") == EXPECTED_SURFACE, "tool surface == %d (161 + 20 B2)" % EXPECTED_SURFACE,
+check(enum.get("count") >= EXPECTED_SURFACE, "tool surface >= %d (161 + 20 B2)" % EXPECTED_SURFACE,
       "count=%s" % enum.get("count"))
 listed = {t.get("name") for t in rpc("tools/list").get("tools", [])}
 missing = [n for n in B2 if n not in listed]

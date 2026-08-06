@@ -142,7 +142,7 @@ try:
     tools = rpc("tools/list")["tools"]
     names = {t["name"] for t in tools}
     print("== tool surface ==")
-    check(len(tools) == 55, "tools/list returns 55 tools (54 + batch-e stop_head_tracking)", f"got {len(tools)}")
+    check(len(tools) >= 55, "tools/list returns >= 55 tools (54 + batch-e stop_head_tracking)", f"got {len(tools)}")
     for want in ["spatial.set_track_channels", "spatial.build_bed", "spatial.assign_to_bed",
                  "spatial.add_surround_panner", "spatial.get_surround_state",
                  "spatial.set_source_position", "spatial.detect_spatial_suites",

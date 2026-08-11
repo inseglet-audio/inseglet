@@ -1,21 +1,21 @@
 #pragma once
 // ================================================================================================
-// identity_tones.h — B4 (doc 131 Batch C): spectral channel-identity QC, SDK-free.
+// identity_tones.h — B4 (Batch C): spectral channel-identity QC, SDK-free.
 //
 // The method is the iamf-adm-corpus's WP1 spectral-identity convention, ported into the DAW:
 // every channel/object carries a UNIQUE non-harmonic identifier sine, so any downstream routing
 // loss, duplication, swap or bleed is detectable by looking for each tone where it should be.
 //
 //   f_k = 313 + 139*k Hz   ... iamf-adm-corpus/README.md:27 ("identifier sine (313 + 139*k Hz;
-//   LFE at 40 Hz)"); doc 16 (WP3 ADM fidelity report) records the same convention for the 34-file
-//   corpus. Level -18 dBFS, 2 s at 48 kHz = the figures doc 113 section 2 used for the insg_*
-//   cross-validation fixtures, and the same plan doc 116 (E-116.1c / E-116.2) verified the Loom
+//   LFE at 40 Hz)");  (WP3 ADM fidelity report) records the same convention for the 34-file
+//   corpus. Level -18 dBFS, 2 s at 48 kHz = the figures  section 2 used for the insg_*
+//   cross-validation fixtures, and the same plan  (E-116.1c / E-116.2) verified the Loom
 //   channel-order bridge with.
 //
 // Why Goertzel and not an FFT: the tone set is KNOWN and DISCRETE, so a per-frequency Goertzel is
 // exact in O(N) per tone with no window/leakage bookkeeping. At 48 kHz every 313 + 139*k completes
 // an INTEGER number of cycles in any whole-second window, which is why the measured off-diagonal
-// rejection in doc 116 was >= 60 dB. A caller who supplies a non-integer-cycle window raises
+// rejection in  was >= 60 dB. A caller who supplies a non-integer-cycle window raises
 // leakage, so this header NEVER asserts identity from the arg-max alone: every verdict carries the
 // measured marginDb, and the caller's threshold is applied to that number.
 //
@@ -26,13 +26,16 @@
 //
 // SDK-free by construction: no REAPER symbols. Detection consumes a meter::AudioBuffer, so the
 // exact same code path serves an external WAV (meter::readWavFile), a rendered stem, and a
-// render-free track audio-accessor read (audio_accessor.h) — the three surfaces doc 107's B4 names.
+// render-free track audio-accessor read (audio_accessor.h) — the three surfaces the design record's B4 names.
 // ================================================================================================
 
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ambisonic_meter.h"
@@ -56,7 +59,7 @@ inline constexpr double kDefaultSilenceDb = -80.0;
 // this guard the arg-max over a set of near-zero powers is noise-driven, and the verdict label
 // (swapped / duplicated) would be arbitrary even though ok=false is correct. Found by the E-135.2
 // negative control, which feeds a 40 Hz LFE channel to a plan that has no 40 Hz slot; recorded in
-// doc 135 as a post-hoc refinement of the classifier, not of the pre-registered vocabulary.
+//  as a post-hoc refinement of the classifier, not of the pre-registered vocabulary.
 inline constexpr double kPlanCoverageFloor = 0.1;   // -20 dB
 // Slot cap: REAPER tracks top out at 128 channels; 313 + 139*127 = 17966 Hz is still well inside
 // the 48 kHz band, so the plan is representable for every legal width.
@@ -65,6 +68,39 @@ inline constexpr int kMaxSlots = 128;
 inline double toneHz(int k) { return kBaseHz + kStepHz * (double)k; }
 
 inline double dbToLin(double db) { return std::pow(10.0, db / 20.0); }
+
+// ---- Content addressing (F-149.1) --------------------------------------------------------------
+// REAPER keeps a per-PATH PCM cache that rewriting the file does NOT invalidate, so a filename
+// fixed by nothing but the slot index silently serves the FIRST audio ever loaded at that path
+// while the tool response faithfully echoes the parameters it was asked for. Measured:
+// ONE read of the source before the overwrite and the rewrite is picked up; TWO reads (or one
+// read plus a render) and it is not -- and elapsed time alone never flips it. So the collision is
+// conditional on prior access, which makes it non-deterministic rather than merely wrong.
+//
+// The repair is to make the PATH A FUNCTION OF THE BYTES. Identical parameters still produce
+// identical audio and therefore an identical path, so the advertised determinism holds and the
+// cache hit is then CORRECT; differing parameters can no longer land on one path at all. This
+// makes the failure impossible rather than fixed once -- deliberately NOT an enumeration of the
+// parameters that happen to matter today, which would silently reopen the moment a new one is
+// added.
+//
+// FNV-1a (64-bit), written from the published algorithm: offset basis 14695981039346656037,
+// prime 1099511628211. Non-cryptographic by intent -- this is a cache-collision guard, not a
+// security boundary.
+inline std::string contentTag(const std::string& bytes) {
+    uint64_t h = 14695981039346656037ULL;
+    for (unsigned char c : bytes) {
+        h ^= (uint64_t)c;
+        h *= 1099511628211ULL;
+    }
+    static const char* kHex = "0123456789abcdef";
+    std::string out(12, '0');
+    for (int i = 11; i >= 0; --i) {
+        out[(size_t)i] = kHex[h & 0xF];
+        h >>= 4;
+    }
+    return out;
+}
 
 // ---- Plan ------------------------------------------------------------------------------------
 struct Slot {
@@ -79,6 +115,12 @@ struct Plan {
     double durSec = kDefaultDurSec;
     double levelDb = kDefaultLevelDb;
     bool lfeRule = true;        // false = pure 313+139k on every slot (the E-135.2 negative control)
+    // constantHz: > 0 puts ONE frequency on EVERY slot,
+    // LFE slots included. This deliberately destroys channel identity -- it exists so a
+    // multichannel loudness fixture can hold one frequency, which the 313+139k plan cannot express
+    // and which blocked the earlier H-A/H-B/H-D legs. A plan carrying it is a LEVEL instrument,
+    // not a ROUTING instrument, and detectRouting refuses it by construction (see below).
+    double constantHz = 0.0;
     std::vector<Slot> slots;
 
     size_t frames() const {
@@ -90,15 +132,19 @@ struct Plan {
 
 // Build the plan for `n` slots. `lfeIdx` lists 0-based LFE slots (empty for object/track mode).
 // `labels` is optional and may be shorter than n.
+// `constantHz` > 0 overrides EVERY slot's frequency, LFE slots included. The `lfe` flag still
+// records which slots ARE LFE slots -- the flag is a statement about the channel, the frequency is
+// a statement about the tone, and overriding the second must not silently rewrite the first.
 inline Plan makePlan(int n, const std::vector<int>& lfeIdx = {},
                      const std::vector<std::string>& labels = {}, int rate = kDefaultRate,
                      double durSec = kDefaultDurSec, double levelDb = kDefaultLevelDb,
-                     bool lfeRule = true) {
+                     bool lfeRule = true, double constantHz = 0.0) {
     Plan p;
     p.rate = rate > 0 ? rate : kDefaultRate;
     p.durSec = durSec > 0.0 ? durSec : kDefaultDurSec;
     p.levelDb = levelDb;
     p.lfeRule = lfeRule;
+    p.constantHz = constantHz > 0.0 ? constantHz : 0.0;
     if (n < 0) n = 0;
     if (n > kMaxSlots) n = kMaxSlots;
     p.slots.reserve((size_t)n);
@@ -106,11 +152,30 @@ inline Plan makePlan(int n, const std::vector<int>& lfeIdx = {},
         Slot s;
         s.index = k;
         s.lfe = lfeRule && (std::find(lfeIdx.begin(), lfeIdx.end(), k) != lfeIdx.end());
-        s.hz = s.lfe ? kLfeHz : toneHz(k);
+        s.hz = p.constantHz > 0.0 ? p.constantHz : (s.lfe ? kLfeHz : toneHz(k));
         if ((size_t)k < labels.size()) s.label = labels[(size_t)k];
         p.slots.push_back(s);
     }
     return p;
+}
+
+// ---- Plan uniqueness  -----------------------------------------------------------------
+// The whole method is UNIQUE per-slot tones: detectRouting's arg-max is only meaningful when no two
+// slots can claim the same energy. Returns the first colliding pair, or {-1,-1} when the tone set
+// is unique.
+//
+// Exact equality is the right comparison and not an oversight. Colliding slots do not arise from
+// arithmetic that might drift -- they arise from ASSIGNING THE SAME NUMBER twice: kLfeHz to every
+// LFE slot (22.2 declares TWO), or constantHz to every slot. A tolerance would additionally be a
+// claim about frequency RESOLUTION, which depends on the analysis window length and is not
+// something this function is in a position to assert; two nearby-but-distinct tones are a
+// measurable margin, and the margin is already reported.
+inline std::pair<int, int> firstDuplicateSlotPair(const Plan& p) {
+    const int n = p.channels();
+    for (int i = 0; i < n; ++i)
+        for (int j = i + 1; j < n; ++j)
+            if (p.slots[(size_t)i].hz == p.slots[(size_t)j].hz) return {i, j};
+    return {-1, -1};
 }
 
 // Per-slot float buffers, one buffer per slot. Deterministic: no dither, no randomness, phase 0.
@@ -163,7 +228,7 @@ inline double channelRms(const meter::AudioBuffer& buf, int ch, size_t begin, si
 }
 
 // ---- Verdicts --------------------------------------------------------------------------------
-// Fixed vocabulary, declared in preregistration-135 section 2 (D7) BEFORE any output existed.
+// Fixed vocabulary, declared in the pre-registration (D7) BEFORE any output existed.
 enum class Verdict { Identity, Swapped, Duplicated, Dropped, Bleed, Silent };
 
 inline const char* verdictName(Verdict v) {
@@ -225,6 +290,38 @@ inline RoutingReport detectRouting(const meter::AudioBuffer& buf, const Plan& pl
     if (n <= 0) {
         r.error = "the plan has no slots";
         return r;
+    }
+    // ---- Structural refusal: the plan's tone set must be UNIQUE  ----------------------
+    // Measured on the shipped tree before this guard existed: a 22.2 plan carries kLfeHz on BOTH
+    // declared LFE slots (bedLayouts() 22.2 = lfe {3, 9}), so on a PERFECTLY ROUTED 24-channel
+    // render the arg-max tied, the strict > kept the first slot, and the report came back
+    // ok=false with channel 3 "bleed" at a margin of exactly 0.000000000 dB and channel 9
+    // "duplicated" -- two false verdicts about correct audio, with planCoverage 1.000000 on both,
+    // i.e. nothing in the numbers looked wrong. A `constantHz` plan makes that total rather than
+    // partial: every channel peaks on slot 0 and identityCount is 0.
+    //
+    // The repair is a REFUSAL and deliberately not a warning. This function's contract is a
+    // per-channel verdict, and there is no true per-channel verdict to give: the energy at 40 Hz
+    // in channel 9 IS slot 3's tone and IS slot 9's tone, and no amount of arithmetic separates
+    // them. verify_routing already promises that a channel-count mismatch is "a refusal, never a
+    // verdict"; a degenerate plan is the same kind of thing. A warning attached to a wrong answer
+    // is still a wrong answer.
+    {
+        const std::pair<int, int> dup = firstDuplicateSlotPair(plan);
+        if (dup.first >= 0) {
+            char hz[64];
+            std::snprintf(hz, sizeof(hz), "%.6f", plan.slots[(size_t)dup.first].hz);
+            r.error = "the plan is degenerate: slots " + std::to_string(dup.first) + " and " +
+                      std::to_string(dup.second) + " both carry " + hz +
+                      " Hz, so no per-channel verdict can distinguish them" +
+                      (plan.constantHz > 0.0
+                           ? " (this plan sets constantHz, which is a level fixture, not a routing "
+                             "fixture)"
+                           : " (a bed layout with more than one LFE slot puts 40 Hz on each; pass "
+                             "lfeChannels omitting all but one, or verify at a width whose tones "
+                             "are unique)");
+            return r;
+        }
     }
     if (buf.channels != n) {
         r.error = "buffer has " + std::to_string(buf.channels) + " channels but the plan declares " +

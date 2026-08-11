@@ -6,6 +6,57 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.9.0] — 2026-08-11
+
+A correctness release. No new tools: the surface is unchanged at **190 tools / 3 resources /
+5 prompts**, and this release adds one parameter and no verbs.
+
+### Fixed
+
+- **`analysis.verify_routing` reported false faults on 22.2 beds.** 22.2 is the only bed layout
+  that declares two LFE slots, and the identifier-tone plan assigned the same 40 Hz LFE tone to
+  both — so the tone set was not unique and the detector could not tell a real fault from a
+  collision. A **correctly routed** 24-channel render came back `ok=false`, with channel 3
+  reported as `bleed` at a margin of exactly 0.000000000 dB and channel 9 as `duplicated`, both
+  at full plan coverage — there was nothing in the reported numbers to indicate the verdict was
+  wrong. Reaching it required following the tool's own guidance and passing back the
+  `lfeChannels` it echoes; callers who omitted them saw a clean 24/24, which is why it went
+  unnoticed. The detector now **refuses** a plan whose tones are not unique and returns no
+  per-channel verdicts at all, rather than attaching a warning to an answer it cannot stand
+  behind. Only 22.2 was affected; every other layout declares exactly one LFE.
+- **7.1.2 beds were measured without BS.1770-4 channel weights, reading 0.350 LU low.** Channel
+  labelling enumerated the other bed widths but had no entry for 10 channels, and the weight
+  table derives entirely from labels — so a 7.1.2 bed silently received a flat weight vector
+  while being reported as `"multichannel"`. 7.1.2 is the **default bed layout in three spatial
+  tools**, and the predicted bed loudness written into the intent sidecar inherited the error.
+  Every accepted layout now comes from one canonical table that the test suite walks, so a
+  layout added later cannot repeat it.
+- **`spatial.inject_identity_tones` advertised `"7.1.2"` and then refused it at runtime.** The
+  layout appeared in the tool's own schema enum while its width lookup had no entry for it. All
+  bed-layout widths now derive from the single canonical table, and five separate hand-written
+  width mappings have been removed. A new guard walks the whole tool registry and asserts that
+  every layout any tool advertises is actually accepted, so this class cannot return.
+- **`spatial.inject_identity_tones` could serve stale audio after a parameter change.** Generated
+  files were named by slot index alone, so two calls with different parameters wrote to the same
+  path. REAPER caches PCM per path from the second access onward, after which a rewrite of that
+  path is not picked up — the tool reported the parameters you asked for while REAPER played the
+  earlier audio. Filenames now include a hash of the audio content, so identical parameters still
+  produce identical paths (determinism is unchanged, and the cache hit is then correct) while
+  different parameters can no longer collide.
+
+### Added
+
+- **`spatial.inject_identity_tones` gains `constantHz`** — put a single frequency on every
+  channel, LFE included, instead of the per-channel identifier ladder. Useful for level and
+  loudness measurement, where a common tone across channels is what you want. The response now
+  reports `routingDetectable`, and no longer suggests routing verification for a plan whose
+  tones are deliberately identical, since routing cannot be inferred from such a render.
+
+### Changed
+
+- Documentation and packaging metadata corrected: the citation file and the manual's version
+  header had drifted behind the released version.
+
 ## [1.8.0] — 2026-08-06
 
 Feature release: **IAMF ingest** — an Inseglet ADM export is now accepted by

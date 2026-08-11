@@ -47,6 +47,8 @@ int main() {
     checkVector(8, {1, 1, 1, 0, 1.41, 1.41, 1.0, 1.0}, "7.1 (Lsr/Rsr M±135 OUT of band — F33)");
     checkVector(12, {1, 1, 1, 0, 1.41, 1.41, 1.0, 1.0, 1, 1, 1, 1},
                 "7.1.4 (rears 1.0, heights unconditionally 1.0)");
+    checkVector(10, {1, 1, 1, 0, 1.41, 1.41, 1.0, 1.0, 1, 1},
+                "7.1.2 (F-143.1: had NO case 10, so both 1.41 cells were missing)");
     checkVector(16, {1, 1, 1, 0, 1.41, 1.41, 1.0, 1.0, 1.41, 1.41, 1, 1, 1, 1, 1, 1},
                 "9.1.6 (Lw/Rw M±060 boundary-INCLUSIVE 1.41; rears 1.0; heights 1.0)");
     {
@@ -68,9 +70,13 @@ int main() {
         check(bedChannelIsLFE(6, 3) && bedChannelIsLFE(24, 3) && bedChannelIsLFE(24, 9) &&
                   !bedChannelIsLFE(2, 0) && !bedChannelIsLFE(12, 4),
               "LFE indices: 3 everywhere, +9 for 22.2, none elsewhere");
+        const std::vector<std::string> l10 = bedChannelLabels(10);
+        check(l10.size() == 10 && l10[4] == "Lss" && l10[5] == "Rss" && l10[6] == "Lsr" &&
+                  l10[7] == "Rsr" && l10[8] == "Ltf" && l10[9] == "Rtf",
+              "7.1.2 labels: sides Lss/Rss, rears Lsr/Rsr, FRONT height pair Ltf/Rtf ");
         check(bedLayoutName(12) == "7.1.4" && bedLayoutName(16) == "9.1.6" &&
-                  bedLayoutName(7) == "multichannel",
-              "layout names");
+                  bedLayoutName(10) == "7.1.2" && bedLayoutName(7) == "multichannel",
+              "layout names (F-143.1: 10 ch used to report \"multichannel\")");
         for (int nch : {2, 6, 8, 12, 16, 24, 5})
             if ((int)bedChannelWeights(nch).size() != nch) {
                 check(false, "weights.size() == nch for " + std::to_string(nch));
@@ -114,6 +120,62 @@ int main() {
         check(near(dWide, expect, 0.01),
               "9.1.6 wide-only: conformant reads " + std::to_string(dWide) +
                   " dB hotter than pre-fix (expect 1.492)");
+    }
+
+    // ==== E-143.2 — the GENERALISING GUARD (F-143.1) =============================
+    // The invariant that would have caught F-143.1, stated over the canonical accepted-layout
+    // table rather than a hand-list: every layout the product accepts must have a real label row,
+    // because bedChannelWeights() derives ENTIRELY from labels — a generic "chN" row silently
+    // yields an all-1.0 weight vector and a quietly wrong loudness figure. The one permitted
+    // exception (22.2) is declared IN the table as data, not special-cased here, so a future
+    // exception has to be written down where the table is read.
+    {
+        for (const BedLayoutEntry& e : bedAcceptedLayouts()) {
+            const std::vector<std::string> lab = bedChannelLabels(e.channels);
+            const bool generic = !lab.empty() && lab[0] == "ch0";
+            check((int)lab.size() == e.channels,
+                  std::string("accepted layout ") + e.name + ": label row width == channels");
+            check(generic != e.labelled,
+                  std::string("accepted layout ") + e.name + " (" +
+                      std::to_string(e.channels) + " ch): labels " +
+                      (e.labelled ? "PRESENT as declared" : "generic as declared (documented)"));
+            check(bedLayoutName(e.channels) == e.name,
+                  std::string("accepted layout ") + e.name + ": bedLayoutName round-trips");
+            // A labelled layout must produce at least one 1.41 cell, otherwise the row exists but
+            // does not reach the weight table (the failure mode one step further in).
+            // ⚠ This first read "at least one weight != 1.0" — which the LFE's 0.0 satisfies FOR
+            // FREE, so it passed against the injected bug. The negative control caught it; review
+            // did not. Assert the Tables-4/5 value ITSELF, not merely non-uniformity.
+            if (e.labelled) {
+                const std::vector<double> w = bedChannelWeights(e.channels);
+                bool anyInBand = false;
+                for (double x : w) if (x == 1.41) anyInBand = true;
+                check(anyInBand, std::string("accepted layout ") + e.name +
+                                     ": labels actually REACH the weight table (a 1.41 cell exists)");
+            }
+        }
+    }
+
+    // ==== E-143.3 — the quantitative pin for F-143.1, both ways ============================
+    // Side-only 7.1.2 content: the pre-fix all-1.0 vector must read exactly 10·log10(1.41) COLDER
+    // than the conformant table, and the whole-bed error on the identity fixture is the
+    // 0.350 LU recorded in the finding. Shown BOTH ways so the pin fails if either drifts.
+    {
+        const double sr = 48000.0;
+        const size_t N = 48000 * 2;
+        meter::AudioBuffer side;
+        side.channels = 10; side.frames = N; side.sampleRate = sr;
+        side.samples.assign(N * 10u, 0.0f);
+        for (int ch : {4, 5})
+            for (size_t i = 0; i < N; ++i)
+                side.samples[i * 10u + (size_t)ch] =
+                    (float)(0.25 * std::sin(2.0 * 3.14159265358979323846 * 997.0 * i / sr));
+        const std::vector<double> preFix712(10, 1.0);   // what the default branch returned
+        const double d = meter::gatedLoudness(side, bedChannelWeights(10)).integratedLufs -
+                         meter::gatedLoudness(side, preFix712).integratedLufs;
+        check(near(d, 10.0 * std::log10(1.41), 0.01),
+              "7.1.2 side-only: conformant reads " + std::to_string(d) +
+                  " dB hotter than the pre-F-143.1 default (expect 1.492)");
     }
 
     if (g_failures) {

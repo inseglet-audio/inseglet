@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 James Livingston
 
-// test_adm_object_order.cpp — pins the doc-139 writer fix (a): EVERY <audioObject> is emitted
+// test_adm_object_order.cpp — pins the writer fix (a): EVERY <audioObject> is emitted
 // before ANY <audioChannelFormat>.
 //
-// Why this is a correctness property and not a style preference (docset 138): iamf-tools'
+// Why this is a correctness property and not a style preference: iamf-tools'
 // ADM importer sets its `gain` tag for any element named `gain` with no parent check, and
 // registers no end-element handler, so `parent` is never reset. A per-block <gain> therefore
 // latches that tag; if an <audioObject> then STARTS while it is latched, the next character

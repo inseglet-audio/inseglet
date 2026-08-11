@@ -19,6 +19,41 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.9.0" author="James Livingston" time="2026-08-11T00:00:00Z">
+        <changelog><![CDATA[Correctness release: 7.1.2 bed loudness, the identity-tone cache, and a routing
+detector that had been reporting false faults on 22.2. Surface UNCHANGED (190 tools /
+3 resources / 5 prompts) - this release adds one parameter and no verbs.
+analysis.verify_routing gave FALSE VERDICTS on 22.2. 22.2 is the only bed layout
+declaring two LFE slots, and the plan put the one 40 Hz LFE tone on both, so the tone set
+was not unique. A PERFECTLY ROUTED 24-channel render came back ok=false, with channel 3
+"bleed" at a margin of exactly 0.000000000 dB and channel 9 "duplicated", both at
+planCoverage 1.000000 - nothing in the numbers signalled it. Reaching it required doing
+exactly what the tool's own description instructs (passing back the echoed lfeChannels);
+with them omitted the same width read a clean 24/24, which is why it went unseen. The
+detector now REFUSES a degenerate plan outright and returns NO per-channel verdicts,
+rather than attaching a warning to a wrong answer.
+7.1.2 beds received NO BS.1770-4 channel weights, reading 0.350 LU LOW. bedChannelLabels()
+enumerated cases 1/2/6/8/12/16 with no case 10, while the LFE predicate beside it
+generalised - so a layout the product accepts silently lost its weights while reporting
+"multichannel". 7.1.2 is the default bedLayout in three spatial tool schemas, and the
+bed.expectLufs claim consumed by iamf-sentinel-pro's intent-compare inherited the error.
+spatial.inject_identity_tones advertised "7.1.2" in its own schema enum and then refused it
+at runtime. Every bed-layout width now derives from ONE canonical table; five hand-rolled
+per-consumer width mappings are deleted. A registry-walking guard asserts that every layout
+any tool advertises is accepted at runtime, so a tool written later is covered by default.
+spatial.inject_identity_tones served STALE AUDIO after a parameter change. Files were named
+by slot index alone, so two calls with different parameters shared one path; REAPER installs
+a per-path PCM cache on the second access, and from then on a rewrite of that path is
+invisible - the tool reported the parameters it was asked for while REAPER played the
+earlier audio. Filenames now carry a hash of the WAV bytes, so identical parameters still
+give identical paths (determinism holds, and the cache hit is then correct) while different
+parameters can no longer collide at all.
+NEW: spatial.inject_identity_tones gains constantHz - one frequency on every slot, LFE
+included, so a multichannel fixture can hold a single frequency. The 313 + 139k plan cannot
+express that. A plan carrying it is a level instrument, not a routing one, and the routing
+detector refuses it by construction.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.9.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.8.0" author="James Livingston" time="2026-08-06T00:00:00Z">
         <changelog><![CDATA[IAMF ingest + in-DAW QC (190 tools / 3 resources / 5 prompts; was 187 / 3 / 4).
 spatial.export_adm now emits every audioObject before any audioChannelFormat, fixing a

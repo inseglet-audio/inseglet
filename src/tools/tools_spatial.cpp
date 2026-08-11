@@ -34,7 +34,7 @@
 //         spatial.mirror_scene, spatial.beamform, spatial.set_distance
 //   Native object-audio authoring (ITU-R BS.2076 ADM BWF):
 //         spatial.author_object_bed, spatial.export_adm
-//   IAMF delivery bridge (emit an iamf-loom manifest + Loom-order WAVs; doc 107 §6-P2):
+//   IAMF delivery bridge (emit an iamf-loom manifest + Loom-order WAVs;  §6-P2):
 //         spatial.export_loom_manifest
 //   (head_track_bridge.h is the SDK-free OSC parser + apply.)
 //
@@ -80,14 +80,14 @@
 #include "../adm_profile.h"    // Dolby Atmos Master ADM Profile normalize + validate
 #include "../damf.h"           // native Dolby Atmos Master File (DAMF) triad serializer (spatial.export_damf)
 #include "../loom_manifest.h"  // Inseglet -> iamf-loom bridge: manifest/season emitters + Loom-order WAV writer
-#include "../intent_sidecar.h" // B1 R1/R2: schema-v0 intent-sidecar emitter + prediction helpers (doc 124)
+#include "../intent_sidecar.h" // B1 R1/R2: schema-v0 intent-sidecar emitter + prediction helpers
 #include "../inseglet_version.h"  // the ONE in-source version string (producer stamp)
 #include "../bed_weights.h"    // F33-conformant BS.1770-4 channel weights (whole-bed expectLufs)
 #include "../send_layout.h"    // SDK-free object send-layout roster/encode/reconcile/inspect (Batch L1)
 #include "../tool_registry.h"
 #include "../spatial_verbs.h"  // SDK-free planning core (target/placement/plan) + composite_support
-#include "../position_params.h"  // D3 (doc 125): representation-aware positional-param discovery
-#include "../identity_tones.h"   // B4 (doc 135): the corpus tone plan + Goertzel routing detector
+#include "../position_params.h"  // D3: representation-aware positional-param discovery
+#include "../identity_tones.h"   // B4: the corpus tone plan + Goertzel routing detector
 
 namespace reaper_mcp {
 
@@ -121,6 +121,17 @@ const std::vector<BedLayout>& bedLayouts() {
          {"L", "R", "C", "LFE", "Lss", "Rss", "Lrs", "Rrs", "Ltf", "Rtf", "Ltr", "Rtr"},
          {3},
          "Dolby Atmos 7.1.4 bed: 7.1 + 4 tops (front Ltf/Rtf, rear Ltr/Rtr)."},
+        // 7.1.2 (F-143.2). Absent until now: every consumer that needed it grafted it
+        // in by hand, and spatial.inject_identity_tones — which did not — refused a layout its
+        // own schema advertised. Labels use THIS file's Lrs/Rrs rear-surround spelling (as do
+        // 7.1 / 7.1.4 / 9.1.6 above and adm::speakerPosFor below), NOT bed_weights.h's Lsr/Rsr;
+        // that divergence is deliberate, documented in bed_weights.h, and a standing founder
+        // call. Adding the row is byte-preserving for ADM output precisely because these are the
+        // labels admBedSpeakers' deleted graft already used.
+        {"7.1.2", 10,
+         {"L", "R", "C", "LFE", "Lss", "Rss", "Lrs", "Rrs", "Ltf", "Rtf"},
+         {3},
+         "Dolby Atmos 7.1.2 bed: 7.1 + 2 front tops (Ltf/Rtf). The canonical Atmos bed."},
         {"9.1.6", 16,
          {"L", "R", "C", "LFE", "Lss", "Rss", "Lrs", "Rrs", "Lw", "Rw",
           "Ltf", "Rtf", "Ltm", "Rtm", "Ltr", "Rtr"},
@@ -834,13 +845,12 @@ Json buildBinauralMonitor(int busIdx, bool ambisonic, int busChannels,
 // marshal the rendered stems into an adm::Model.
 // ---------------------------------------------------------------------------------------------
 
-// Bed speakers for an ADM layout: the project bed layouts PLUS the Atmos-canonical 7.1.2 (10 ch).
+// Bed speakers for an ADM layout, straight out of bedLayouts().
 // Positions + BS.2051 speaker labels come from adm::speakerPosFor.
+// 7.1.2 used to be grafted in here by hand because bedLayouts had no row for it.
 std::vector<adm::BedSpeaker> admBedSpeakers(const std::string& layout) {
     std::vector<std::string> labels;
-    if (layout == "7.1.2")
-        labels = {"L", "R", "C", "LFE", "Lss", "Rss", "Lrs", "Rrs", "Ltf", "Rtf"};
-    else if (const BedLayout* bl = findBedLayout(layout))
+    if (const BedLayout* bl = findBedLayout(layout))
         for (const char* l : bl->labels) labels.push_back(l);
     std::vector<adm::BedSpeaker> out;
     for (const std::string& l : labels) {
@@ -854,9 +864,7 @@ std::vector<adm::BedSpeaker> admBedSpeakers(const std::string& layout) {
     return out;
 }
 inline int admBedChannels(const std::string& layout) {
-    if (layout == "7.1.2") return 10;
-    const BedLayout* bl = findBedLayout(layout);
-    return bl ? bl->channels : -1;
+    return bedLayoutChannels(layout, -1);   // one table, no per-site graft
 }
 
 // Parse the leading signed number out of a formatted param string ("45.0 °", "-90.00 deg", "3.5 m").
@@ -992,7 +1000,7 @@ std::vector<adm::Block> objectTrajectory(MediaTrack* t, double startWin, double 
     return blocks;
 }
 
-// ---- intent-sidecar measurement helpers (B1 R1/R2, doc 124) --------------------------------
+// ---- intent-sidecar measurement helpers (B1 R1/R2) --------------------------------
 // K-weighted gated loudness of one already-rendered channel (weight 1.0 — the consumer's
 // per-stem convention; positional weights apply only to the whole bed).
 double intentMonoLufs(const std::vector<float>& x, double sampleRate) {
@@ -1345,7 +1353,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                 (a.contains("paramY") && a["paramY"].is_number()) ||
                 (a.contains("paramZ") && a["paramZ"].is_number());
 
-            // ---- D3 (doc 125): angle-representation panner -> drive azimuth/elevation. The
+            // ---- D3: angle-representation panner -> drive azimuth/elevation. The
             //      bare-letter scan used to land on "Quaternion X" — and on "aZimuth Angle"
             //      for z — on IEM encoders: params the exporter never samples, so a "set"
             //      succeeded while the exported trajectory never moved. Explicit paramX/Y/Z
@@ -3362,7 +3370,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             const bool wantProfile = (profileMode == "dolby-atmos");
             // `dbmd` posture — INDEPENDENT of `profile` above. profile:"dolby-atmos" still emits no
             // `dbmd` (batch O3's pinned chunk list does not move); this switch is the only thing that
-            // does. Default "none" => byte-identical output to a pre-doc-141 export.
+            // does. Default "none" => byte-identical output to a pre-the export.
             const std::string dolbyMetaMode = optStr(a, "dolbyMetadataChunk", "none");
             const bool wantDbmd = (dolbyMetaMode == "placeholder");
             int bitDepth = optInt(a, "bitDepth", 24);
@@ -3557,7 +3565,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                 profileJson["normalized"] = normed;
             }
 
-            // Runtime discoverability (doc 140 §6). An opt-in nobody discovers is an opt-in that
+            // Runtime discoverability. An opt-in nobody discovers is an opt-in that
             // does not exist. FIRE IT PRECISELY — only when dynamic objects are present AND the
             // switch is off, the one configuration where the gate actually bites; a bed-only
             // export never sees this. The failure mode for a runtime hint is not going unread, it
@@ -3685,7 +3693,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             os.close();
             if (!os) return makeError("file_write_failed", "error writing the ADM file to " + outPath, "");
 
-            // ---- intent sidecar (B1 R1, doc 124): the session's own predictions, written
+            // ---- intent sidecar (B1 R1): the session's own predictions, written
             // beside the deliverable AFTER it exists. A sidecar write failure is a warning,
             // never a failed export (honesty over rollback — the deliverable is already real).
             std::string sidecarPath;
@@ -3764,9 +3772,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                                          {"objectNumber", (int)j + 1}, {"positionSource", "host"},
                                          {"blocks", 1}, {"channels", 1}});
             auto hostBedCh = [](const std::string& L) -> int {
-                if (L == "7.1.2") return 10;
-                const BedLayout* b = findBedLayout(L);
-                return b ? b->channels : 0;
+                return bedLayoutChannels(L, 0);   // one table, no per-site graft
             };
             const int bedCh = hostBedCh(bedLayout);
             Json profileJson = Json(nullptr);
@@ -4085,9 +4091,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                                          {"objectNumber", (int)j + 1}, {"positionSource", "host"},
                                          {"blocks", 1}, {"channels", 1}});
             auto hostBedCh = [](const std::string& L) -> int {
-                if (L == "7.1.2") return 10;
-                const BedLayout* b = findBedLayout(L);
-                return b ? b->channels : 0;
+                return bedLayoutChannels(L, 0);   // one table, no per-site graft
             };
             const int bedCh = hostBedCh(bedLayout);
             return Json{{"dryRun", dryRun}, {"ok", true},
@@ -4101,7 +4105,7 @@ void registerSpatialTools(ToolRegistry& reg) {
 #endif
         }});
 
-    // ---- spatial.export_loom_manifest — the Inseglet -> iamf-loom bridge (doc 107 §6-P2) ------------
+    // ---- spatial.export_loom_manifest — the Inseglet -> iamf-loom bridge (§6-P2) ------------
     reg.add(Tool{
         "spatial.export_loom_manifest",
         "Export the session's immersive program as an iamf-loom package source: render the bed and/or "
@@ -4530,7 +4534,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                 if (!os) return makeError("file_write_failed", "error writing " + seasonPath, "");
             }
 
-            // ---- intent sidecar (B1 R2, doc 124): predictions for the bed/scene stems this
+            // ---- intent sidecar (B1 R2): predictions for the bed/scene stems this
             // call just rendered; VO stems carry no claims in v0 (absent block = absent claim).
             // A sidecar write failure is a warning, never a failed export.
             std::string sidecarPath;
@@ -4689,13 +4693,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             const bool haveBedArg = a.contains("bedTrack") && a["bedTrack"].is_number();
             // Bed layout -> width (mirrors admBedChannels; local so both build configs see it).
             auto layoutWidth = [](const std::string& L) -> int {
-                if (L == "5.1")   return 6;
-                if (L == "7.1")   return 8;
-                if (L == "7.1.2") return 10;
-                if (L == "7.1.4") return 12;
-                if (L == "9.1.6") return 16;
-                if (L == "22.2")  return 24;
-                return -1;
+                return bedLayoutChannels(L, -1);   // one table, no per-site graft
             };
             const int expectBedW = layoutWidth(bedLayout);
             if (expectBedW < 0)
@@ -4876,7 +4874,7 @@ void registerSpatialTools(ToolRegistry& reg) {
 #endif
         }});
 
-    // ---- spatial.inject_identity_tones — B4 channel-identity QC, author half (doc 135) ----------
+    // ---- spatial.inject_identity_tones — B4 channel-identity QC, author half -----------
     reg.add(Tool{
         "spatial.inject_identity_tones",
         "Lay a unique identifier sine on every channel (or every listed track) so any downstream "
@@ -4893,7 +4891,16 @@ void registerSpatialTools(ToolRegistry& reg) {
         "SAME plan. place:false (or a host build without the placement API) writes the WAVs and "
         "reports placed:false with their paths rather than pretending to have placed them; "
         "dryRun:true returns the plan and writes nothing. Tone material is deterministic (phase 0, "
-        "no dither), so re-running produces byte-identical WAVs. NB this authors QC material, not "
+        "no dither), so re-running produces byte-identical WAVs — and the filename carries a hash "
+        "of those bytes, so identical parameters reuse one path while DIFFERENT parameters can "
+        "never collide on it (REAPER's per-path PCM cache would otherwise serve the first load's "
+        "audio). Always read the returned `wavs` paths; do not construct them. constantHz overrides "
+        "the whole plan with ONE frequency on every slot, LFE slots included, for a multichannel "
+        "level/loudness fixture that the 313 + 139*k plan cannot express; it is reported in the "
+        "returned plan and warned about, and it makes the material USELESS for routing detection by "
+        "construction — analysis.verify_routing refuses a plan whose tones are not unique rather "
+        "than returning verdicts it cannot support. NB this authors QC "
+        "material, not "
         "programme material — remove or mute the items before rendering a deliverable.",
         jparse(R"({"type":"object","properties":{
             "mode":{"type":"string","enum":["channels","tracks"],"default":"channels"},
@@ -4903,6 +4910,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             "channels":{"type":"integer","minimum":1,"maximum":128},
             "lfeChannels":{"type":"array","items":{"type":"integer","minimum":0}},
             "labels":{"type":"array","items":{"type":"string"}},
+            "constantHz":{"type":"number","exclusiveMinimum":0,"maximum":24000},
             "position":{"type":"number","minimum":0,"default":0},
             "durationSec":{"type":"number","minimum":0.1,"default":2.0},
             "levelDb":{"type":"number","default":-18.0},
@@ -4915,6 +4923,7 @@ void registerSpatialTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{
             "ok":{"type":"boolean"},"dryRun":{"type":"boolean"},"mode":{"type":"string"},
             "channels":{"type":"integer"},"lfeChannels":{"type":"array"},
+            "constantHz":{"type":"number"},"routingDetectable":{"type":"boolean"},
             "sampleRate":{"type":"integer"},"durationSec":{"type":"number"},
             "levelDb":{"type":"number"},"bitDepth":{"type":"integer"},"frames":{"type":"integer"},
             "plan":{"type":"array"},"wavs":{"type":"array"},"placed":{"type":"boolean"},
@@ -4993,8 +5002,35 @@ void registerSpatialTools(ToolRegistry& reg) {
                                          std::to_string(nSlots),
                                      "LFE indices are 0-based and below the channel count");
 
-            const it::Plan plan =
-                it::makePlan(nSlots, lfeIdx, labels, rate, durSec, levelDb, /*lfeRule*/ true);
+            // constantHz: ONE frequency on every slot,
+            // LFE slots included. The plan below therefore has a non-unique tone set by design,
+            // which is exactly what analysis.verify_routing now refuses -- so say so here, loudly,
+            // rather than letting a caller carry a level fixture into a routing check.
+            const double constantHz = optNum(a, "constantHz", 0.0);
+            if (a.contains("constantHz") && !(constantHz > 0.0))
+                return makeError("constantHz must be greater than 0",
+                                 "got " + std::to_string(constantHz),
+                                 "omit constantHz for the 313 + 139*k plan, or pass a positive Hz");
+            if (constantHz > 0.0 && constantHz >= (double)rate / 2.0)
+                return makeError("constantHz is at or above Nyquist for this sample rate",
+                                 std::to_string(constantHz) + " Hz at " + std::to_string(rate) +
+                                     " Hz sample rate",
+                                 "choose a frequency below sampleRate/2");
+
+            const it::Plan plan = it::makePlan(nSlots, lfeIdx, labels, rate, durSec, levelDb,
+                                               /*lfeRule*/ true, constantHz);
+
+            if (constantHz > 0.0) {
+                warnings.push_back(
+                    "constantHz: every slot carries " + std::to_string(constantHz) +
+                    " Hz, so this material CANNOT be used for routing detection — "
+                    "analysis.verify_routing will refuse a plan whose tones are not unique");
+                if (!lfeIdx.empty())
+                    warnings.push_back(
+                        "constantHz OVERRODE the 40 Hz LFE convention on " +
+                        std::to_string(lfeIdx.size()) + " LFE slot(s); the plan reports the "
+                        "overridden frequency, and lfe:true still marks which slots those are");
+            }
 
             Json planJson = Json::array();
             for (const auto& s : plan.slots)
@@ -5003,9 +5039,21 @@ void registerSpatialTools(ToolRegistry& reg) {
             Json lfeJson = Json::array();
             for (int L : lfeIdx) lfeJson.push_back(L);
 
+            // Whether the material this call authors can support a routing verdict at all. False
+            // for constantHz, and ALSO false for a plan whose LFE rule collides on its own --
+            // 22.2 declares two LFE slots, so its 40 Hz lands twice.
+            const bool routingDetectable = it::firstDuplicateSlotPair(plan).first < 0;
+
             Json base{{"mode", mode}, {"channels", nSlots}, {"lfeChannels", lfeJson},
+                      {"constantHz", constantHz}, {"routingDetectable", routingDetectable},
                       {"sampleRate", rate}, {"durationSec", durSec}, {"levelDb", levelDb},
                       {"bitDepth", bitDepth}, {"frames", (int)plan.frames()}, {"plan", planJson}};
+
+            if (!routingDetectable && constantHz <= 0.0)
+                warnings.push_back(
+                    "this layout declares more than one LFE slot, so the 40 Hz LFE tone is not "
+                    "unique and analysis.verify_routing will refuse the plan; pass lfeChannels "
+                    "with at most one index to make the tone set unique");
 
             if (dryRun) {
                 base["ok"] = true;
@@ -5029,9 +5077,16 @@ void registerSpatialTools(ToolRegistry& reg) {
 
             const auto chans = it::renderPlan(plan);
             std::vector<std::string> paths;
+            // F-149.1 (mechanism measured): the filename is CONTENT-ADDRESSED.
+            // REAPER's per-path PCM cache survives a rewrite of that path, so a name fixed by the
+            // slot index alone silently serves the first audio ever loaded there. Hashing the
+            // bytes keeps the advertised determinism (same parameters -> same bytes -> same path,
+            // and the cache hit is then correct) while making a cross-parameter collision
+            // impossible. See idtone::contentTag.
             auto writeWav = [&](const std::vector<std::vector<float>>& c,
-                                const std::string& name) -> bool {
+                                const std::string& stem) -> bool {
                 const std::string bytes = loomb::writeWavPcm(c, plan.frames(), rate, bitDepth);
+                const std::string name = stem + "_" + it::contentTag(bytes) + ".wav";
                 const std::string p = (std::filesystem::path(outDir) / name).string();
                 std::ofstream f(p, std::ios::binary);
                 if (!f) return false;
@@ -5043,13 +5098,13 @@ void registerSpatialTools(ToolRegistry& reg) {
             if (mode == "tracks") {
                 for (int k = 0; k < nSlots; ++k) {
                     std::vector<std::vector<float>> one{chans[(size_t)k]};
-                    if (!writeWav(one, "insg_tone_" + std::to_string(k) + ".wav"))
+                    if (!writeWav(one, "insg_tone_" + std::to_string(k)))
                         return makeError("could not write the tone WAV",
                                          "outDir = " + outDir,
                                          "pass an outDir the process can write to");
                 }
             } else {
-                if (!writeWav(chans, "insg_tones_" + std::to_string(nSlots) + "ch.wav"))
+                if (!writeWav(chans, "insg_tones_" + std::to_string(nSlots) + "ch"))
                     return makeError("could not write the tone WAV", "outDir = " + outDir,
                                      "pass an outDir the process can write to");
             }
@@ -5105,9 +5160,20 @@ void registerSpatialTools(ToolRegistry& reg) {
             base["placed"] = placed;
             base["items"] = items;
             base["warnings"] = warnings;
-            base["next"] = "analysis.verify_routing with channels=" + std::to_string(nSlots) +
-                           " and the lfeChannels echoed above";
-            base["note"] = "identity tones: 313 + 139*k Hz (LFE 40 Hz), the iamf-adm-corpus plan";
+            // Do NOT point a caller at verify_routing for material that cannot support a routing
+            // verdict. The old text said it unconditionally, and following it on a constantHz or
+            // two-LFE plan is precisely how a false verdict gets believed.
+            base["next"] = routingDetectable
+                               ? ("analysis.verify_routing with channels=" +
+                                  std::to_string(nSlots) + " and the lfeChannels echoed above")
+                               : "analysis.meter (boundsFlag:0 with startPos/endPos) — this plan's "
+                                 "tones are not unique, so analysis.verify_routing will refuse it";
+            base["note"] = constantHz > 0.0
+                               ? ("constant-frequency fixture: " + std::to_string(constantHz) +
+                                  " Hz on every slot, LFE included — a LEVEL instrument, not a "
+                                  "routing instrument")
+                               : "identity tones: 313 + 139*k Hz (LFE 40 Hz), the iamf-adm-corpus "
+                                 "plan";
             return base;
         }});
 }

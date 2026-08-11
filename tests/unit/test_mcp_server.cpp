@@ -23,6 +23,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include "bed_weights.h"      // bedAcceptedLayouts — the canonical layout table
 #include "composite_support.h"  // Phase 6 (d): requireElicitation / makeError for the test verb
 #include "track_chunk.h"         // Phase 8 (D3): validateTrackChunk / diffTrackChunks unit checks
 #include "discovery.h"
@@ -1957,7 +1958,7 @@ int main() {
         json lr = rpc(cli, cfg.token, lreq);
         check(lr.contains("result"), "prompts/list has result");
         const json& prompts = lr["result"]["prompts"];
-        // Doc 141: 4 -> 5. The fifth prompt (author_dolby_adm) sorts FIRST, so every index moves.
+        // 4 -> 5. The fifth prompt (author_dolby_adm) sorts FIRST, so every index moves.
         // This pin and test_prompts.cpp:40's are the two that had to move in the same commit.
         check(prompts.is_array() && prompts.size() == 5, "prompts/list returns the 5 expert workflows");
         // std::map -> deterministic alphabetical order.
@@ -2306,7 +2307,7 @@ int main() {
               "analysis.adm_profile_check on a missing file returns file_not_found");
     }
 
-    // --- 2l''. B1 R1/R2 (doc 124): the intentSidecar param on both export verbs -----------------
+    // --- 2l''. B1 R1/R2: the intentSidecar param on both export verbs -----------------
     // Host build: the param flows through and the response echoes the planned sidecar path; the
     // emitter itself is proven in unit.intent_sidecar. Negative control: without the param the
     // response carries NO intentSidecarPath key (additive surface only).
@@ -2475,6 +2476,96 @@ int main() {
         }
         check(migSpans, "flyby dominant speaker migrates across Lss..Rss");
         check(moving, "flyby is reported moving with ~180 deg of angular travel");
+    }
+
+    // --- F-143.2 guard: every ADVERTISED bedLayout must be ACCEPTED at runtime ----------------
+    //
+    // F-143.2: spatial.inject_identity_tones advertised "7.1.2" in its bedLayout
+    // schema enum and then REFUSED it at runtime ("unknown bedLayout: 7.1.2"), because
+    // tools_spatial.cpp's bedLayouts() had no 7.1.2 row and every other consumer grafted the
+    // layout in by hand (`if (layout == "7.1.2")`). The schema enum was the only place in the
+    // product that believed 7.1.2 was uniformly supported. Same shape as F-143.1 one level up:
+    // a table that ENUMERATES beside consumers that GENERALISE.
+    //
+    // The invariant is ADVERTISE => ACCEPT, walked mechanically across the WHOLE registry, so a
+    // tool written next year is covered without anyone remembering this bug.
+    //
+    // DIRECTIVE 29: a check that can be satisfied FOR FREE is not a check. A tool that
+    // throws on a missing required arg never reaches its layout lookup, so "no unknown-layout
+    // error" would pass VACUOUSLY. Every (tool, layout) pair therefore carries its own negative
+    // control: the same call with a deliberately bogus layout MUST produce the unknown-layout
+    // error. A pair whose control does not fire is counted UNREACHABLE, never as a pass.
+    {
+        auto argsFor = [](const std::string& layout) -> json {
+            // A generous bundle: handlers read what they need and ignore the rest. Handlers are
+            // invoked directly, so schema additionalProperties does not apply here.
+            return json{{"bedLayout", layout}, {"dryRun", true}, {"place", false},
+                        {"mode", "channels"}, {"track", 0}, {"bedTrack", 0}, {"rendererTrack", 0},
+                        {"objectTracks", json::array({1})}};
+        };
+        auto isLayoutRefusal = [](const json& r) {
+            const std::string s = r.dump();
+            return s.find("unknown bedLayout") != std::string::npos ||
+                   s.find("unknown bed layout") != std::string::npos ||
+                   s.find("unknown_layout") != std::string::npos;
+        };
+        auto invoke = [&](const Tool* t, const std::string& layout) -> json {
+            if (!t || !t->handler) return json{{"_nohandler", true}};
+            try { return t->handler(argsFor(layout)); }
+            catch (const std::exception& e) { return json{{"_threw", e.what()}}; }
+            catch (...) { return json{{"_threw", "unknown"}}; }
+        };
+
+        int pairsChecked = 0, pairsUnreachable = 0, advertisers = 0;
+        bool coversInjectIdentityTones = false;
+        for (const Tool* t : tools.list({Profile::Full})) {
+            if (!t->inputSchema.is_object() || !t->inputSchema.contains("properties")) continue;
+            const json& props = t->inputSchema["properties"];
+            if (!props.contains("bedLayout")) continue;
+            const json& bl = props["bedLayout"];
+            if (!bl.is_object() || !bl.contains("enum") || !bl["enum"].is_array()) continue;
+            ++advertisers;
+
+            // Per-pair reachability control (directive 14: establish the check RAN).
+            const bool reachable = isLayoutRefusal(invoke(t, "9.9.9"));
+            if (!reachable) {
+                pairsUnreachable += (int)bl["enum"].size();
+                std::fprintf(stderr, "  note: %s — layout check unreachable in the host build "
+                                     "(an earlier gate fires first); %d pair(s) not counted\n",
+                             t->name.c_str(), (int)bl["enum"].size());
+                continue;
+            }
+            if (t->name == "spatial.inject_identity_tones") coversInjectIdentityTones = true;
+            for (const auto& v : bl["enum"]) {
+                if (!v.is_string()) continue;
+                const std::string layout = v.get<std::string>();
+                ++pairsChecked;
+                check(!isLayoutRefusal(invoke(t, layout)),
+                      t->name + " accepts the bedLayout it advertises: " + layout);
+            }
+        }
+
+        // The guard must not be allowed to silently degrade to zero coverage.
+        check(advertisers > 0, "advertise=>accept guard found at least one bedLayout enum");
+        check(pairsChecked > 0, "advertise=>accept guard reached at least one (tool, layout) pair");
+        check(coversInjectIdentityTones,
+              "advertise=>accept guard still reaches spatial.inject_identity_tones — the tool "
+              "F-143.2 was found in; if this fails the guard has stopped covering its own bug");
+        std::fprintf(stderr, "  [advertise=>accept] %d advertiser(s), %d pair(s) checked, "
+                             "%d unreachable\n", advertisers, pairsChecked, pairsUnreachable);
+
+        // Cross-check WIDTH against the canonical table (src/bed_weights.h), so the accepted-layout
+        // table and the tool surface cannot drift apart silently — that drift IS F-143.1.
+        // Directive 29: assert the VALUE that encodes the invariant (the exact channel count),
+        // never merely that a lookup succeeded.
+        const Tool* iit = tools.find("spatial.inject_identity_tones");
+        check(iit != nullptr, "spatial.inject_identity_tones is registered");
+        for (const BedLayoutEntry& e : bedAcceptedLayouts()) {
+            const json r = invoke(iit, e.name);
+            check(!isLayoutRefusal(r) && r.value("channels", -1) == e.channels,
+                  std::string("bedAcceptedLayouts row '") + e.name + "' resolves through the tool "
+                  "surface to exactly " + std::to_string(e.channels) + " channels");
+        }
     }
 
     // --- teardown ---

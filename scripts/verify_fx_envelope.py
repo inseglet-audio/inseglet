@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Live-verify doc 136 — envelope.ensure_fx_envelope, the FX-param authoring seam.
+"""Live-verify  — envelope.ensure_fx_envelope, the FX-param authoring seam.
 
 Exercises, end-to-end on the real SDK path against a running REAPER, the pre-registered
-expectations E-136.1 .. E-136.9 (preregistration-136.md):
+expectations E-136.1.. E-136.9:
 
   E-136.1  GetFXEnvelope(create=true) returns an envelope for a never-automated param
   E-136.2  "ensure" is idempotent — a second call creates nothing

@@ -49,6 +49,56 @@
 
 namespace reaper_mcp {
 
+// ---- The canonical accepted-bed-layout table (F-143.1) -----------------------------
+// The single source of truth for "which bed layouts does the product accept". Every layout-
+// dependent table in this file must cover every entry, and `unit.bed_weights` walks this table and
+// FAILS if one does not — so the next layout cannot repeat F-143.1.
+//
+// F-143.1: 7.1.2 was the DEFAULT `bedLayout` in three spatial tool schemas while
+// bedChannelLabels() had no `case 10`. A 7.1.2 bed therefore fell through to generic "ch0".."ch9"
+// labels, lost BOTH its Lss/Rss 1.41 cells (reading 0.350 LU LOW — measured), and
+// reported its layout as "multichannel". Nothing failed; the number was quietly wrong, including
+// in the B1 intent sidecar's bed.expectLufs, which iamf-sentinel-pro's intent-compare consumes.
+//
+// The cause was STRUCTURAL, not a typo: bedChannelIsLFE() is a PREDICATE that GENERALISES
+// (`nch >= 6 && idx == 3`, so it covered 10 channels for free) sitting directly beside switches
+// that ENUMERATE. A layout the product accepts but a switch omits gets correct LFE exclusion for
+// free and silently loses its weights. A table + a test that walks it is the guard.
+//
+// NB tools_spatial.cpp's bedLayouts() does NOT contain 7.1.2 either — it is grafted in by special
+// case at each site that needs it (see admBedSpeakers). Deriving bedLayouts() and the schema enums
+// from THIS table is the real fix for that class and is deliberately NOT done in this beat.
+struct BedLayoutEntry {
+    const char* name;
+    int channels;
+    bool labelled;   // false ONLY for a documented, deliberate exception
+};
+inline const std::vector<BedLayoutEntry>& bedAcceptedLayouts() {
+    static const std::vector<BedLayoutEntry> kAccepted = {
+        {"5.1", 6, true},   {"7.1", 8, true},     {"7.1.2", 10, true},
+        {"7.1.4", 12, true}, {"9.1.6", 16, true},
+        // 22.2 is DELIBERATELY unlabelled and unweighted: its interleave order is renderer-
+        // dependent (header banner above), so per-index Table-5 cells would be a guess about
+        // channel identity. The honest posture is unweighted + documented, not silently
+        // "conformant" against an assumed order.
+        {"22.2", 24, false},
+    };
+    return kAccepted;
+}
+
+// Channel width for an accepted bed layout; returns `missing` when the name is not in the table.
+//
+// THE single width lookup for the whole product.  (F-143.2) deleted FIVE hand-rolled
+// copies of this mapping — admBedChannels, export_adm's and export_damf's hostBedCh,
+// orchestrate_sends' and send_layout_inspect's layoutWidth — each of which had to remember
+// 7.1.2 separately, and one consumer (spatial.inject_identity_tones) had no copy at all and so
+// REFUSED a layout its own schema advertised. Derive, never re-enumerate.
+inline int bedLayoutChannels(const std::string& name, int missing = -1) {
+    for (const BedLayoutEntry& e : bedAcceptedLayouts())
+        if (name == e.name) return e.channels;
+    return missing;
+}
+
 // Best-effort SMPTE channel labels for the immersive bed widths, so per-channel metering reads as
 // "C / LFE / Lss / Ltf" rather than bare indices. LFE lives at channel index 3 (and index 9 for 22.2)
 // — those channels are excluded from BS.1770 program loudness.
@@ -58,6 +108,7 @@ inline std::string bedLayoutName(int nch) {
         case 2:  return "stereo";
         case 6:  return "5.1";
         case 8:  return "7.1";
+        case 10: return "7.1.2";   //  / F-143.1 — was reported as "multichannel"
         case 12: return "7.1.4";
         case 16: return "9.1.6";
         case 24: return "22.2";
@@ -70,6 +121,11 @@ inline std::vector<std::string> bedChannelLabels(int nch) {
         case 2:  return {"L", "R"};
         case 6:  return {"L", "R", "C", "LFE", "Ls", "Rs"};
         case 8:  return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr"};
+        // 7.1.2 (F-143.1). Order matches tools_spatial.cpp's admBedSpeakers("7.1.2")
+        // and 7.1.4's first ten channels; the front height pair is the one 7.1.2 carries
+        // (: our U±045 top-FRONT pair). Spelling follows THIS file's Lsr/Rsr convention,
+        // not admBedSpeakers' Lrs/Rrs — the divergence is documented above and is a founder call.
+        case 10: return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr", "Ltf", "Rtf"};
         case 12: return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr",
                          "Ltf", "Rtf", "Ltr", "Rtr"};
         case 16: return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr",

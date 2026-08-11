@@ -1,6 +1,6 @@
 # REAPER MCP — Tool, Resource & Prompt Reference
 
-> **Generated** 2026-08-05 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
+> **Generated** 2026-08-10 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
 
 
 **Protocol:** MCP `2025-06-18` · **Surface:** 190 tools · 3 resources · 5 prompts.
@@ -6875,7 +6875,7 @@ Returns a structured object with: `fxIndex`, `name`, `numChannels`, `numSpeakers
 
 **Profile:** `spatial` · **Hints:** mutating
 
-Lay a unique identifier sine on every channel (or every listed track) so any downstream routing fault is measurable, then verify it with analysis.verify_routing. This is the iamf-adm-corpus's spectral-identity method brought into the session: slot k carries 313 + 139*k Hz (LFE slots carry 40 Hz), -18 dBFS, 2 s at 48 kHz by default — non-harmonic tones with no shared partials, so a swap, a drop, a duplicate or a few dB of bleed each leave a distinct signature. mode=channels writes ONE multichannel WAV and places it on `track` (verifies bed channel order); mode=tracks writes one MONO WAV per entry in `tracks` (verifies per-object send routing — the routing you cannot see from the mixer). Pass bedLayout to fill channels + LFE indices + speaker labels from the standard bed table, or give channels/lfeChannels/labels directly. The response echoes `lfeChannels` and `channels` — hand them straight to analysis.verify_routing so both halves judge the SAME plan. place:false (or a host build without the placement API) writes the WAVs and reports placed:false with their paths rather than pretending to have placed them; dryRun:true returns the plan and writes nothing. Tone material is deterministic (phase 0, no dither), so re-running produces byte-identical WAVs. NB this authors QC material, not programme material — remove or mute the items before rendering a deliverable.
+Lay a unique identifier sine on every channel (or every listed track) so any downstream routing fault is measurable, then verify it with analysis.verify_routing. This is the iamf-adm-corpus's spectral-identity method brought into the session: slot k carries 313 + 139*k Hz (LFE slots carry 40 Hz), -18 dBFS, 2 s at 48 kHz by default — non-harmonic tones with no shared partials, so a swap, a drop, a duplicate or a few dB of bleed each leave a distinct signature. mode=channels writes ONE multichannel WAV and places it on `track` (verifies bed channel order); mode=tracks writes one MONO WAV per entry in `tracks` (verifies per-object send routing — the routing you cannot see from the mixer). Pass bedLayout to fill channels + LFE indices + speaker labels from the standard bed table, or give channels/lfeChannels/labels directly. The response echoes `lfeChannels` and `channels` — hand them straight to analysis.verify_routing so both halves judge the SAME plan. place:false (or a host build without the placement API) writes the WAVs and reports placed:false with their paths rather than pretending to have placed them; dryRun:true returns the plan and writes nothing. Tone material is deterministic (phase 0, no dither), so re-running produces byte-identical WAVs — and the filename carries a hash of those bytes, so identical parameters reuse one path while DIFFERENT parameters can never collide on it (REAPER's per-path PCM cache would otherwise serve the first load's audio). Always read the returned `wavs` paths; do not construct them. constantHz overrides the whole plan with ONE frequency on every slot, LFE slots included, for a multichannel level/loudness fixture that the 313 + 139*k plan cannot express; it is reported in the returned plan and warned about, and it makes the material USELESS for routing detection by construction — analysis.verify_routing refuses a plan whose tones are not unique rather than returning verdicts it cannot support. NB this authors QC material, not programme material — remove or mute the items before rendering a deliverable.
 
 **Parameters**
 
@@ -6884,6 +6884,7 @@ Lay a unique identifier sine on every channel (or every listed track) so any dow
 | `bedLayout` | enum | no | one of: `5.1`, `7.1`, `7.1.2`, `7.1.4`, `9.1.6`, `22.2` |
 | `bitDepth` | enum | no | one of: `16`, `24`; default `24` |
 | `channels` | integer | no | range [1, 128] |
+| `constantHz` | number | no | max 24000 |
 | `dryRun` | boolean | no | default `false` |
 | `durationSec` | number | no | default `2.0`; min 0.1 |
 | `labels` | array&lt;string&gt; | no | — |
@@ -6901,7 +6902,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `items`, `levelDb`, `lfeChannels`, `mode`, `next`, `note`, `ok`, `outDir`, `placed`, `plan`, `remediation`, `sampleRate`, `warnings`, `wavs`.
+Returns a structured object with: `bitDepth`, `channels`, `constantHz`, `detail`, `dryRun`, `durationSec`, `error`, `frames`, `items`, `levelDb`, `lfeChannels`, `mode`, `next`, `note`, `ok`, `outDir`, `placed`, `plan`, `remediation`, `routingDetectable`, `sampleRate`, `warnings`, `wavs`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -6933,6 +6934,11 @@ Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `d
         "maximum": 128,
         "minimum": 1,
         "type": "integer"
+      },
+      "constantHz": {
+        "exclusiveMinimum": 0,
+        "maximum": 24000,
+        "type": "number"
       },
       "dryRun": {
         "default": false,
@@ -7007,6 +7013,9 @@ Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `d
       "channels": {
         "type": "integer"
       },
+      "constantHz": {
+        "type": "number"
+      },
       "detail": {
         "type": "string"
       },
@@ -7054,6 +7063,9 @@ Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `d
       },
       "remediation": {
         "type": "string"
+      },
+      "routingDetectable": {
+        "type": "boolean"
       },
       "sampleRate": {
         "type": "integer"
@@ -16603,7 +16615,7 @@ Returns a structured object with: `boundsFlag`, `count`, `detail`, `dryRun`, `er
 
 **Profile:** `analysis` · **Hints:** read-only, idempotent
 
-Read a point in the signal path and report which identifier tone actually arrived on each channel — the read-only counterpart to spatial.inject_identity_tones, and a general routing verifier that works on any pipeline, not just an immersive one. Give it a WAV (an external file or a rendered stem) via `path`, or a live track via `track` for a render-free audio-accessor read. Detection is Goertzel at the plan's own frequencies (313 + 139*k Hz, LFE 40 Hz), so it is exact for the known tone set and reports a MEASURED margin rather than a guess: each channel comes back as identity / swapped / duplicated / dropped / bleed / silent, with marginDb (its own tone versus the strongest other tone) and planCoverage (how much of the channel that tone actually is). ok=true means every channel carried its own tone with at least minMarginDb of separation — a clean identity map. A swap names its partner, a duplicate names the other carrier, and bleed names the interfering slot, so the report says what to fix and where. Pass the channels and lfeChannels that spatial.inject_identity_tones echoed, so both halves judge the same plan; a channel-count mismatch is a refusal, never a verdict.
+Read a point in the signal path and report which identifier tone actually arrived on each channel — the read-only counterpart to spatial.inject_identity_tones, and a general routing verifier that works on any pipeline, not just an immersive one. Give it a WAV (an external file or a rendered stem) via `path`, or a live track via `track` for a render-free audio-accessor read. Detection is Goertzel at the plan's own frequencies (313 + 139*k Hz, LFE 40 Hz), so it is exact for the known tone set and reports a MEASURED margin rather than a guess: each channel comes back as identity / swapped / duplicated / dropped / bleed / silent, with marginDb (its own tone versus the strongest other tone) and planCoverage (how much of the channel that tone actually is). ok=true means every channel carried its own tone with at least minMarginDb of separation — a clean identity map. A swap names its partner, a duplicate names the other carrier, and bleed names the interfering slot, so the report says what to fix and where. Pass the channels and lfeChannels that spatial.inject_identity_tones echoed, so both halves judge the same plan; a channel-count mismatch is a refusal, never a verdict. So is a DEGENERATE plan — one in which two slots would carry the same frequency, which happens when a layout declares more than one LFE slot (22.2 declares two, so 40 Hz lands twice) or when the material was authored with inject_identity_tones' constantHz. The energy at that frequency belongs to both slots and no arithmetic separates them, so this verb refuses rather than reporting the bleed/duplicated pair the arg-max would otherwise invent.
 
 **Parameters**
 
@@ -16926,4 +16938,4 @@ Scaffold an immersive Dolby Atmos session — a bed, N object tracks, a binaural
 
 ---
 
-_Reference generated 2026-08-05 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._
+_Reference generated 2026-08-10 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._

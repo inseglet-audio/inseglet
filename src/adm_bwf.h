@@ -50,9 +50,9 @@ namespace adm {
 
 enum class Coord { Spherical, Cartesian };
 
-// `dbmd` (Dolby bitstream metadata) chunk posture — OPT-IN, never default (doc 140 §2).
+// `dbmd` (Dolby bitstream metadata) chunk posture — OPT-IN, never default.
 //   None        => no `dbmd` chunk, bed audioChannelFormatNames stay "L"/"R"/"C"/... .
-//                  Byte-identical to a pre-doc-141 export. This is the default.
+//                  Byte-identical to a pre-the export. This is the default.
 //   Placeholder => a placeholder `dbmd` chunk AND RoomCentric* bed names, TOGETHER.
 //                  They are one switch, not two: see dolbyMetadataRefusal() below for why.
 // A "Populated" value is deliberately NOT defined yet, so it can be added later without an
@@ -111,7 +111,7 @@ struct Model {
     // subsequent one) and clamps cartesian X/Y/Z to [-1,1]. Off => byte-identical to an export without it.
     bool        dolbyProfile  = false;
     // `dbmd` posture. INDEPENDENT of `dolbyProfile` above — profile:"dolby-atmos" still emits no
-    // `dbmd` (batch O3's pinned chunk list is unchanged by doc 141). Default None => byte-identical.
+    // `dbmd` (batch O3's pinned chunk list is unchanged by ). Default None => byte-identical.
     DolbyMetadata dolbyMetadataChunk = DolbyMetadata::None;
 
     int channelCount() const { return (int)bed.size() + (int)objects.size(); }
@@ -182,7 +182,7 @@ inline std::string fmtNum(double v) {
 // BS.2076 position domains: azimuth -180..+180, elevation -90..+90, distance >= 0. The writer
 // normalizes at serialization time so a panner-sampled value (an automation sweep hands the tool
 // az 270 as readily as az -90) can never produce a file a spec-strict reader rejects — EAR
-// hard-fails the whole file on an out-of-range azimuth (found in the doc-113 cross-validation, W-1).
+// hard-fails the whole file on an out-of-range azimuth (found in the cross-validation, W-1).
 inline double wrapAzDeg(double az) {
     double a = std::fmod(az + 180.0, 360.0);
     if (a < 0) a += 360.0;
@@ -260,7 +260,7 @@ inline SpeakerPos speakerPosFor(const std::string& layout, const std::string& lb
 // ============================================================================================
 //
 // WHY THE BED RENAME AND THE CHUNK ARE ONE SWITCH, not two independent fixes. Measured from the
-// consumer's own source at ~/src/d137-iamf/src/iamf-tools, read 2026-08-06 (docset 140 §3):
+// consumer's own source at ~/src/d137-iamf/src/iamf-tools, read 2026-08-06:
 //   bw64_reader.cc:167-169   CheckDbmd is GetChunkInfo("dbmd").status() — THE PAYLOAD IS NEVER READ.
 //   bw64_reader.cc:200-203   `dbmd` present => kAdmFileTypeDolby, else kAdmFileTypeDefault.
 //   xml_to_adm.cc:511-516    the per-object validator branches on that enum; the DEFAULT branch
@@ -281,7 +281,7 @@ inline SpeakerPos speakerPosFor(const std::string& layout, const std::string& lb
 //
 // Upstream's vocabulary carries exactly ONE height pair, so a 7.1.2 bed has no other target on
 // offer. Recorded here as a decision rather than buried in a lookup that reads like identity:
-// doc 140 §5 predicted this map would need no such judgement, and that prediction was wrong.
+//  §5 predicted this map would need no such judgement, and that prediction was wrong.
 struct DolbyBedName { const char* label; const char* roomCentric; const char* code; };
 
 inline const std::vector<DolbyBedName>& dolbyBedNames() {
@@ -308,7 +308,7 @@ inline const DolbyBedName* dolbyBedName(const std::string& label) {
     return nullptr;  // outside the vocabulary => this layout cannot take the switch
 }
 
-// ⚠️ C4 — the constraint neither docset 140 nor preregistration-141 had. Upstream does not stop
+// ⚠️ C4 — the constraint neither  nor the pre-registration had. Upstream does not stop
 // when CreatePackLayout succeeds: xml_to_adm.cc:491 then calls ValidatePackLayout, which checks
 // the COMMA-JOINED, ORDERED layout string against an allow-list of exactly eight entries
 // (xml_to_adm.cc:375-394). Name-set membership is NECESSARY BUT NOT SUFFICIENT.
@@ -416,7 +416,7 @@ inline std::string dolbyMetadataRefusal(const Model& m) {
 
 // The placeholder `dbmd` payload: a version word then zeroes. There is nothing to populate —
 // upstream reads the chunk's EXISTENCE only (bw64_reader.cc:167-169) — and populating it would
-// be exactly the unearned provenance claim doc 140 §2 declined. Byte-for-byte the same 32-byte
+// be exactly the unearned provenance claim  §2 declined. Byte-for-byte the same 32-byte
 // placeholder the iamf-adm-corpus generator writes for its "dlb" family (adm_corpus_gen.py:117-120),
 // so an Inseglet export and a corpus file stay structurally comparable here.
 inline std::string buildDbmdPlaceholder() {
@@ -466,13 +466,13 @@ inline std::string buildAxml(const Model& m) {
 
     int uid = 1;  // running audioTrackUID index (1-based, over all data channels)
 
-    // doc 139 (writer fix a): iamf-tools' ADM importer latches its `gain` tag with no
+    //  (writer fix a): iamf-tools' ADM importer latches its `gain` tag with no
     // parent check and never resets `parent` (no end-element handler), so an <audioObject>
     // that STARTS after a per-block <gain> mis-parses the next character data it sees.
     // Emitting every audioObject before any audioChannelFormat removes that adjacency and
     // matches the convention of every ADM file the importer accepts. The three buffers keep
     // the original single pass — and its `uid` threading — byte-for-byte intact; only the
-    // order in which they are joined changes. See docset 138 for the measured mechanism.
+    // order in which they are joined changes. See the design record for the measured mechanism.
     std::string xObj, xPack, xChan;
 
     // ---- BED: one audioObject (DirectSpeakers) ----
@@ -500,7 +500,7 @@ inline std::string buildAxml(const Model& m) {
             // branch of the importer reads THIS attribute and nothing else about the channel —
             // not <speakerLabel>, not <position> (xml_to_adm.cc:237-238, :478-491). With the
             // switch off the name stays "L"/"R"/... and the export is byte-identical to a
-            // pre-doc-141 one. The mapping cannot be missing here — writeAdmImage refuses the
+            // pre-the one. The mapping cannot be missing here — writeAdmImage refuses the
             // whole export first — but fall back to the plain label rather than emit an empty
             // name if buildAxml is ever called directly.
             const DolbyBedName* dn = (m.dolbyMetadataChunk == DolbyMetadata::Placeholder)
@@ -511,7 +511,7 @@ inline std::string buildAxml(const Model& m) {
                  "\" typeLabel=\"0001\" typeDefinition=\"DirectSpeakers\">\n";
             if (s.lfe) {
                 // frequency is an audioChannelFormat sub-element (BS.2076; mirrors the BS.2094
-                // common-definitions LFE channel). Emitting it inside the block was doc-113 W-2:
+                // common-definitions LFE channel). Emitting it inside the block was the W-2:
                 // spec-strict readers (EAR) ignore it there and warn on the label/frequency mismatch.
                 xChan += "          <frequency typeDefinition=\"lowPass\">120</frequency>\n";
             }
@@ -601,7 +601,7 @@ inline std::string buildAxml(const Model& m) {
         ++uid;
     }
 
-    // doc 139: objects first, then packs, then channels (see the note above).
+    // objects first, then packs, then channels (see the note above).
     x += xObj;
     x += xPack;
     x += xChan;
@@ -760,7 +760,7 @@ inline WriteResult writeAdmImage(const Model& m, const std::vector<std::vector<f
     std::string chna = buildChna(m);
     std::string axml = buildAxml(m);
     // Empty unless the switch is on => the `dbmd` term drops out of both the projected size and
-    // the chunk sequence below, and the output stays byte-identical to a pre-doc-141 export.
+    // the chunk sequence below, and the output stays byte-identical to a pre-the export.
     std::string dbmd = (m.dolbyMetadataChunk == DolbyMetadata::Placeholder)
                            ? buildDbmdPlaceholder() : std::string();
 
@@ -778,7 +778,7 @@ inline WriteResult writeAdmImage(const Model& m, const std::vector<std::vector<f
     // ⚠️ EVERY chunk appended below must ALSO be counted here — this sum is what picks RIFF vs
     // BW64 against the 4 GiB limit, so a chunk added only to the addChunk sequence makes the
     // container decision against a size that is wrong by that chunk's length. Silent corruption
-    // near the boundary. Written down in docset 140 §7 before the edit, for exactly this reason.
+    // near the boundary. Written down in the design record before the edit, for exactly this reason.
     uint64_t projected = 4 /*WAVE*/ + (8 + fmt.size()) + (8 + chna.size() + (chna.size() & 1)) +
                          (8 + axml.size() + (axml.size() & 1)) + (8 + dataSize + (dataSize & 1)) +
                          (dbmd.empty() ? 0 : (8 + dbmd.size() + (dbmd.size() & 1)));
@@ -795,7 +795,7 @@ inline WriteResult writeAdmImage(const Model& m, const std::vector<std::vector<f
         putLE32(f, 0xFFFFFFFFu);  // RF64 sentinel
         f += "WAVE";
         // ds64: riffSize, dataSize, sampleCount (64-bit each) + tableLength(0).
-        // riffSize is patched to the real value after assembly (doc-113 W-3; BS.2088 defines the
+        // riffSize is patched to the real value after assembly (the W-3; BS.2088 defines the
         // field as the actual RIFF size — 0 happened to be tolerated by EAR but is non-conformant).
         std::string ds64;
         putLE64(ds64, 0);          // riffSize placeholder — patched post-assembly below
@@ -948,7 +948,7 @@ inline ParseResult parseAdmImage(const std::string& s) {
         chnaJson = Json{{"numTracks", numTracks}, {"numUIDs", numUIDs}, {"tracks", uids}};
     }
 
-    // Pack-type classification from chna packRefs (doc-113 I-1, inspect half). The type is encoded
+    // Pack-type classification from chna packRefs (the I-1, inspect half). The type is encoded
     // in the ID itself (AP_yyyyxxxx: yyyy = typeLabel), and an index <= 0x0FFF is a BS.2094 common
     // definition — so DirectSpeakers/HOA/binaural content is classifiable even when the file only
     // REFERENCES common definitions and defines nothing inline (the dominant broadcast dialect,
@@ -983,7 +983,7 @@ inline ParseResult parseAdmImage(const std::string& s) {
     // axml summary (best-effort structural scan)
     Json admJson = Json(nullptr);
     if (haveAxml && !axml.empty()) {
-        // audioFormatExtended's own version attribute (doc-113 I-6: a plain first-match scan for
+        // audioFormatExtended's own version attribute (the I-6: a plain first-match scan for
         // version= lands on the XML declaration's version="1.0" and always reports "1.0").
         std::string afeVersion;
         {
@@ -996,7 +996,7 @@ inline ParseResult parseAdmImage(const std::string& s) {
                 }
             }
         }
-        // Per-channel readout (doc-113 I-5): one bounded entry per inline audioChannelFormat —
+        // Per-channel readout (the I-5): one bounded entry per inline audioChannelFormat —
         // name, type, block count, first speakerLabel, coordinate flavour. No per-block data (a
         // dense trajectory can carry thousands of blocks); deep extraction stays a harness concern.
         Json channelsJson = Json::array();

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 James Livingston
 
-// fx_envelope.h — FX-parameter envelope addressing (iamf-docset doc 136). The SDK-free core
+// fx_envelope.h — FX-parameter envelope addressing. The SDK-free core
 // behind envelope.ensure_fx_envelope, unit-tested without REAPER (unit.fx_envelope).
 //
 // Why this exists. `envelope.ensure_fx_envelope` wraps one SDK call —
@@ -18,7 +18,7 @@
 //      track each expose an identically-named param, GetTrackEnvelopeByName returns one of
 //      them and a subsequent add_point writes to the wrong FX with ok:true.
 //
-// Both are the doc-125/126 failure shape: a scan that always yields *some* answer yields one
+// Both are the/126 failure shape: a scan that always yields *some* answer yields one
 // for input that does not determine an answer, and the caller gets a successful write whose
 // effect lands somewhere else. D3 hit it when a bare-letter scan drove "Quaternion X"; B4 hit
 // it when an arg-max classified input outside its domain. The rule that falls out of all

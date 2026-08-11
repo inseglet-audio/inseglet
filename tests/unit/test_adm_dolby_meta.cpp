@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 James Livingston
 
-// test_adm_dolby_meta.cpp — pins the doc-141 `dolbyMetadataChunk` switch: the placeholder `dbmd`
+// test_adm_dolby_meta.cpp — pins the `dolbyMetadataChunk` switch: the placeholder `dbmd`
 // chunk, the RoomCentric* bed rename that RIDES it, the refusals, and the RIFF-size arithmetic.
 //
 // Why the chunk and the rename are ONE switch (measured from iamf-tools' own source, 2026-08-06):
@@ -10,7 +10,7 @@
 // site at :487). Room-centric names on a file with no `dbmd` are therefore unread — and still make
 // a Dolby provenance claim. Coupling them is the correctness property; this file pins it.
 //
-// ⚠️ The load-bearing case is `riff_size_counts_dbmd`. docset 140 §7 wrote down, BEFORE the edit,
+// ⚠️ The load-bearing case is `riff_size_counts_dbmd`. The design record wrote down, BEFORE the edit,
 // that a new chunk must enter BOTH the projected-size sum that picks RIFF vs BW64 AND the append
 // sequence. Adding it only to the append sequence is silent corruption near the 4 GiB boundary and
 // would pass every other test here.
@@ -83,7 +83,7 @@ static WriteResult writeOf(const Model& m, uint64_t threshold = 0xFFFFFFFFull) {
 }
 
 int main() {
-    std::fprintf(stderr, "== doc 141: dolbyMetadataChunk ==\n");
+    std::fprintf(stderr, "==: dolbyMetadataChunk ==\n");
 
     // ---- 1. DEFAULT is inert: no `dbmd`, plain bed names ------------------------------------
     {
@@ -178,7 +178,7 @@ int main() {
               "every refused model writes fine with dolbyMetadataChunk None");
     }
 
-    // ---- 6. ⚠️ THE TRAP (docset 140 §7): the dbmd MUST enter the projected-size sum -----------
+    // ---- 6. ⚠️ THE TRAP: the dbmd MUST enter the projected-size sum -----------
     // ⚠️ ISOLATION MATTERS HERE. A BEDDED model is the wrong probe: the switch also renames the bed,
     // and "RoomCentricLeftSideSurround" is far longer than "Lss", so the axml grows too and a
     // container flip could be caused by either. An OBJECTS-ONLY model has no bed to rename, so the

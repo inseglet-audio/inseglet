@@ -43,9 +43,9 @@
 #include "../render_stems.h"     // shared bounded stem-render helpers (temp render + sample read-back)
 #include "../deliverable_specs.h"// the named deliverable specs + the pure pass/fail evaluator
 #include "../ambisonic_meter.h"  // metering DSP (WAV read + per-channel + ambisonic field)
-#include "../bed_weights.h"     // SMPTE bed labels + BS.1770-4 channel weights (doc 117 / F33)
+#include "../bed_weights.h"     // SMPTE bed labels + BS.1770-4 channel weights (F33)
 #include "../audio_accessor.h"   // render-free direct sample reads (accessor -> meter::AudioBuffer)
-#include "../identity_tones.h"   // B4 (doc 135): the corpus tone plan + Goertzel routing detector
+#include "../identity_tones.h"   // B4: the corpus tone plan + Goertzel routing detector
 #include "../adm_bwf.h"          // ADM (BS.2076) parse + summarize for analysis.adm_inspect
 #include "../adm_profile.h"      // Dolby Atmos Master ADM Profile conformance validator
 #include "../damf.h"             // DAMF triad parse + summarize for analysis.damf_inspect
@@ -2631,13 +2631,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             namespace sl = send_layout;
             // Bed width: explicit bedChannels wins; else map bedLayout (mirrors admBedChannels); else 0.
             auto layoutWidth = [](const std::string& L) -> int {
-                if (L == "5.1")   return 6;
-                if (L == "7.1")   return 8;
-                if (L == "7.1.2") return 10;
-                if (L == "7.1.4") return 12;
-                if (L == "9.1.6") return 16;
-                if (L == "22.2")  return 24;
-                return 0;
+                return bedLayoutChannels(L, 0);   // one table, no per-site graft
             };
             int bedW = 0;
             if (a.contains("bedChannels") && a["bedChannels"].is_number()) bedW = a["bedChannels"].get<int>();
@@ -3115,7 +3109,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"interpretation", topInterp}, {"warnings", warnings}};
         }});
 
-    // ---- analysis.verify_routing — B4 channel-identity QC, read-only half (doc 135) -------------
+    // ---- analysis.verify_routing — B4 channel-identity QC, read-only half --------------
     reg.add(Tool{
         "analysis.verify_routing",
         "Read a point in the signal path and report which identifier tone actually arrived on each "
@@ -3131,7 +3125,12 @@ void registerAnalysisTools(ToolRegistry& reg) {
         "map. A swap names its partner, a duplicate names the other carrier, and bleed names the "
         "interfering slot, so the report says what to fix and where. Pass the channels and "
         "lfeChannels that spatial.inject_identity_tones echoed, so both halves judge the same "
-        "plan; a channel-count mismatch is a refusal, never a verdict.",
+        "plan; a channel-count mismatch is a refusal, never a verdict. So is a DEGENERATE plan — "
+        "one in which two slots would carry the same frequency, which happens when a layout "
+        "declares more than one LFE slot (22.2 declares two, so 40 Hz lands twice) or when the "
+        "material was authored with inject_identity_tones' constantHz. The energy at that "
+        "frequency belongs to both slots and no arithmetic separates them, so this verb refuses "
+        "rather than reporting the bleed/duplicated pair the arg-max would otherwise invent.",
         jparse(R"({"type":"object","properties":{
             "path":{"type":"string"},
             "track":{"type":"integer","minimum":0},
@@ -3221,7 +3220,9 @@ void registerAnalysisTools(ToolRegistry& reg) {
             const it::RoutingReport r = it::detectRouting(buf, plan, minMargin, silenceDb);
             if (!r.error.empty())
                 return makeError("the buffer and the plan do not agree", r.error,
-                                 "pass the channels/lfeChannels that inject_identity_tones echoed");
+                                 "pass the channels/lfeChannels that inject_identity_tones echoed "
+                                 "— and check its routingDetectable field, which is false for a "
+                                 "constantHz fixture or a layout with more than one LFE slot");
 
             Json per = Json::array();
             for (const auto& c : r.perChannel)

@@ -195,7 +195,7 @@ target_link_libraries(reaper_mcp_identity_tones_test PRIVATE Threads::Threads)
 add_test(NAME unit.identity_tones COMMAND reaper_mcp_identity_tones_test)
 
 # --- Unit: FX-param envelope addressing (fx_envelope.h; header-only, no REAPER) ---
-# The pure half of envelope.ensure_fx_envelope (doc 136): tiered param-name resolution that
+# The pure half of envelope.ensure_fx_envelope: tiered param-name resolution that
 # REFUSES an ambiguous request instead of picking, and the envelope-name collision count that
 # decides whether the by-name envelope.add_point seam is safe at all. Carries the negative
 # control that REPRODUCES the defect — the naive first-substring rule answering "Angle" with
@@ -205,10 +205,10 @@ target_include_directories(reaper_mcp_fx_envelope_test PRIVATE ${CMAKE_SOURCE_DI
 add_test(NAME unit.fx_envelope COMMAND reaper_mcp_fx_envelope_test)
 
 # --- Unit: ADM audioObject/audioChannelFormat emission ORDER (adm_bwf.h; header-only, no REAPER) ---
-# Pins doc 139's writer fix (a). iamf-tools' ADM importer latches its `gain` tag with no parent
+# Pins the design record's writer fix (a). Iamf-tools' ADM importer latches its `gain` tag with no parent
 # check and never resets `parent` (no end-element handler), so an <audioObject> that STARTS after
 # a per-block <gain> makes the importer parse our indentation as a gain and refuse the file
-# (`INVALID_ARGUMENT: Failed to parse gain`, docset 138). Carries the negative control that
+# (`INVALID_ARGUMENT: Failed to parse gain`). Carries the negative control that
 # REPRODUCES the defect: the predicate must FIRE on a hand-built interleaved document, so a green
 # result cannot be a predicate that never fires.
 add_executable(reaper_mcp_adm_object_order_test unit/test_adm_object_order.cpp)
@@ -217,13 +217,13 @@ target_include_directories(reaper_mcp_adm_object_order_test PRIVATE
 target_link_libraries(reaper_mcp_adm_object_order_test PRIVATE Threads::Threads)
 add_test(NAME unit.adm_object_order COMMAND reaper_mcp_adm_object_order_test)
 
-# --- Unit: doc 141 dolbyMetadataChunk (adm_bwf.h; header-only, no REAPER) -----------------------
+# --- Unit: dolbyMetadataChunk (adm_bwf.h; header-only, no REAPER) ------------------------
 # Pins the opt-in `dbmd` switch and the RoomCentric* bed rename that RIDES it — they are ONE
 # switch because a consumer only reads those channel names when a `dbmd` selects its Dolby branch
 # (measured from iamf-tools' source 2026-08-06). Also pins the four refusals (24-bit, 48k/96k, and
 # the pack-layout allow-list that rules out 7.1.4 / 9.1.6 / 22.2) and, load-bearingly, that the new
-# chunk enters the projected-size sum choosing RIFF vs BW64 — the silent-corruption class docset
-# 140 §7 wrote down BEFORE the edit, which every other assertion here would miss.
+# chunk enters the projected-size sum choosing RIFF vs BW64 — the silent-corruption class that
+# was written down BEFORE the edit, which every other assertion here would miss.
 add_executable(reaper_mcp_adm_dolby_meta_test unit/test_adm_dolby_meta.cpp)
 target_include_directories(reaper_mcp_adm_dolby_meta_test PRIVATE
   ${CMAKE_SOURCE_DIR}/src ${REAPER_MCP_DEP_INCLUDE_DIRS})

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live-verify Batch C / B4 — in-DAW channel-identity QC (docset doc 135).
+"""Live-verify Batch C / B4 — in-DAW channel-identity QC.
 
 Exercises, end-to-end on the real SDK path against a running REAPER:
   * spatial.inject_identity_tones — author the corpus tone plan (313 + 139*k Hz, LFE 40 Hz,

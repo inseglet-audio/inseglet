@@ -37,7 +37,7 @@ int main() {
     PromptRegistry reg;
     registerExpertPrompts(reg);
 
-    // Doc 141 moved this pin 4 -> 5 (author_dolby_adm). A DELIBERATE surface change, not a fix:
+    //  moved this pin 4 -> 5 (author_dolby_adm). A DELIBERATE surface change, not a fix:
     // the fifth prompt is the worked example for spatial.export_adm's dolbyMetadataChunk opt-in.
     // It sorts FIRST alphabetically, so every index below shifts by one — which is the point of
     // pinning the order rather than only the count.

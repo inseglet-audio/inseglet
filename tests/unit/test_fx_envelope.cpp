@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 James Livingston
 
-// test_fx_envelope.cpp — unit test for the doc-136 FX-param envelope addressing core
+// test_fx_envelope.cpp — unit test for the FX-param envelope addressing core
 // (src/fx_envelope.h). No REAPER, no SDK.
 //
 // The negative control REPRODUCES the defect the tiered resolver exists to kill: the naive
 // "first substring wins" rule, applied to the IEM StereoEncoder roster with a request of
 // "Angle", returns AZIMUTH — so a caller meaning elevation would get a successful write on the
-// wrong axis. That is the same live-observed shape as D3's letter scan (doc 125/126) and B4's
-// out-of-domain arg-max (doc 135), and if this control ever stops firing the roster no longer
+// wrong axis. That is the same live-observed shape as D3's letter scan  and B4's
+// out-of-domain arg-max, and if this control ever stops firing the roster no longer
 // exercises the defect and the suite must say so.
 
 #include <cstdio>
@@ -35,7 +35,7 @@ static int naiveFirstSubstring(const std::vector<std::string>& roster, const std
 }
 
 int main() {
-    // The IEM StereoEncoder roster (VST3, live-observed doc 125), in param-index order.
+    // The IEM StereoEncoder roster (VST3, live-observed ), in param-index order.
     const std::vector<std::string> iem = {
         "Azimuth Angle",    // 0
         "Elevation Angle",  // 1

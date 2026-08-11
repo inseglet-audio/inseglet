@@ -13,7 +13,7 @@
 // "Pan", or an FX-param envelope). Values are in the envelope's native units (Volume = linear gain,
 // Pan = -1..1), matching REAPER's InsertEnvelopePoint. Dual-path; mutations single-undo.
 //
-// envelope.ensure_fx_envelope (doc 136) covers the case autoActivate cannot: an FX-PARAM envelope,
+// envelope.ensure_fx_envelope  covers the case autoActivate cannot: an FX-PARAM envelope,
 // which has no track-chunk block name and so needs the FX+param context rather than a chunk edit.
 // It wraps GetFXEnvelope(..., create=true), but its contract is the STRING, not the envelope —
 // add_point resolves its target with GetTrackEnvelopeByName, so the verb returns the envelope's
@@ -397,7 +397,7 @@ void registerEnvelopeTools(ToolRegistry& reg) {
         }});
 
     // =====================================================================================
-    // FX-parameter envelopes (doc 136) — the authoring seam add_point could not reach.
+    // FX-parameter envelopes — the authoring seam add_point could not reach.
     // =====================================================================================
 
     // ---- envelope.ensure_fx_envelope (mutating; idempotent) ----

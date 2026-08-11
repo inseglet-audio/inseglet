@@ -3,7 +3,7 @@
 
 // test_identity_tones.cpp — pure unit test for the B4 channel-identity QC core
 // (src/identity_tones.h): the corpus tone plan (313 + 139*k Hz, LFE 40 Hz), the Goertzel
-// detector, and the fixed verdict vocabulary. Doc 135; preregistration-135.md pins the
+// detector, and the fixed verdict vocabulary. The pre-registration pins the
 // expectations E-135.1 .. E-135.4 and fixes the verdict names BEFORE any output existed.
 //
 // The round trip is deliberately through the SHIPPED writer (loomb::writeWavPcm) and the
@@ -33,7 +33,7 @@ static void check(bool cond, const std::string& what) {
     else       { std::fprintf(stderr, "  ok:   %s\n", what.c_str()); }
 }
 
-// Windows CI: /tmp does not exist there (doc 97/99 class; the same fix test_meter.cpp carries).
+// Windows CI: /tmp does not exist there (class; the same fix test_meter.cpp carries).
 static std::string tmpPath(const char* name) {
     std::error_code ec;
     std::filesystem::path dir = std::filesystem::temp_directory_path(ec);
@@ -81,7 +81,7 @@ int main() {
     namespace it = idtone;
 
     // ==== E-135.1 — round-trip identity at five widths, worst margin >= 60 dB ==================
-    // 2 = stereo, 6 = 5.1, 12 = 7.1.4, 16 = 9.1.6, 24 = 22.2. Doc 116 measured 12/6/2; 16 and 24
+    // 2 = stereo, 6 = 5.1, 12 = 7.1.4, 16 = 9.1.6, 24 = 22.2.  measured 12/6/2; 16 and 24
     // are new here, and 24 is the widest bed the product declares.
     {
         for (int n : {2, 6, 12, 16, 24}) {
@@ -161,7 +161,7 @@ int main() {
                       vn(off.perChannel[3].verdict) + ")");
             // The channel's real content (40 Hz) is not in the no-LFE plan AT ALL, so the arg-max
             // over the plan's tones is noise. The coverage guard must say exactly that rather than
-            // guess a swap or a duplicate from a near-zero winner. (Doc 135's post-hoc refinement,
+            // guess a swap or a duplicate from a near-zero winner. (the design record's post-hoc refinement,
             // discovered by this control.)
             check(off.perChannel[3].verdict == it::Verdict::Dropped,
                   std::string("LFE negative control: it reports 'dropped', not a guessed swap/dup "
@@ -281,6 +281,119 @@ int main() {
         const it::Plan big = it::makePlan(500);
         check(big.channels() == it::kMaxSlots, "slot count clamps at the 128-channel REAPER cap");
         check(it::toneHz(127) < 24000.0, "the widest legal slot still fits below Nyquist @48k");
+    }
+
+    // ==== F-149.1: the WAV path is content-addressed ==========================================
+    // The defect was never in the DSP — the writer was always correct. It was that one filename
+    // served two different audios, and REAPER's per-path PCM cache then handed back the first.
+    // So the property to pin is a property of contentTag, and it is pinned in BOTH directions:
+    // equal bytes MUST collide (that is the advertised determinism) and unequal bytes MUST NOT.
+    {
+        const it::Plan a = it::makePlan(1, {}, {}, 48000, 4.0, -18.0, true);
+        const it::Plan b = it::makePlan(1, {}, {}, 48000, 4.0, -30.0, true);
+        const auto ca = it::renderPlan(a);
+        const auto cb = it::renderPlan(b);
+        const std::string wa = loomb::writeWavPcm(ca, a.frames(), 48000, 24);
+        const std::string wb = loomb::writeWavPcm(cb, b.frames(), 48000, 24);
+
+        // positive control: the two fixtures really do differ, so the test below is reachable
+        check(wa != wb, "F-149.1 control: -18 dBFS and -30 dBFS render to different bytes");
+        check(wa.size() == wb.size(),
+              "F-149.1 control: and they are the SAME SIZE — which is why size cannot be the "
+              "cache key and the old filename collided");
+
+        const std::string ta = it::contentTag(wa);
+        const std::string tb = it::contentTag(wb);
+        check(ta.size() == 12 && tb.size() == 12, "contentTag is 12 hex characters");
+        check(ta.find_first_not_of("0123456789abcdef") == std::string::npos,
+              "contentTag is lowercase hex and therefore filename-safe on every platform");
+        check(ta != tb, "F-149.1: DIFFERENT audio gets a DIFFERENT path — the defect is closed");
+        check(ta == it::contentTag(wa),
+              "F-149.1: IDENTICAL audio gets the IDENTICAL path — determinism preserved");
+
+        // negative control: the guard must be able to say no. A one-bit change must move the tag,
+        // or an 'always different' tag would pass the line above for the wrong reason.
+        std::string wc = wa;
+        wc[wc.size() / 2] = (char)(wc[wc.size() / 2] ^ 0x01);
+        check(it::contentTag(wc) != ta, "F-149.1 negative control: a single flipped bit moves the tag");
+    }
+
+    // ==== constantHz, and the degenerate-plan refusal it exposed ========================
+    // Measured on the tree BEFORE the guard existed (/tmp/d152-probe.cpp): a 22.2 plan with the
+    // lfeChannels its own tool echoes ({3, 9}) put 40 Hz on two slots, and a PERFECTLY ROUTED
+    // 24-channel render came back ok=false, channel 3 "bleed" at a margin of exactly 0.000000000
+    // dB, channel 9 "duplicated", planCoverage 1.000000 on both. Two false verdicts about correct
+    // audio, with nothing in the numbers to signal it. These cases pin the refusal that replaced
+    // it, in both directions.
+    {
+        // The exact configuration that produced the false verdicts. It must now REFUSE.
+        const it::Plan p22 = it::makePlan(24, {3, 9}, {}, 48000, 1.0);
+        check(it::firstDuplicateSlotPair(p22).first == 3 &&
+                  it::firstDuplicateSlotPair(p22).second == 9,
+              "22.2's two LFE slots are detected as the colliding pair (3, 9)");
+        const auto c22 = it::renderPlan(p22);
+        const it::RoutingReport r22 = it::detectRouting(join(c22, 48000.0), p22);
+        check(!r22.error.empty() && !r22.ok,
+              "a two-LFE plan is a structural REFUSAL, not a bleed/duplicated verdict");
+        check(r22.perChannel.empty(),
+              "a refusal carries NO per-channel verdicts at all");
+
+        // Positive control, and the reason the defect was never seen: verify_routing's DEFAULT
+        // lfeChannels is empty, and an empty LFE list makes the same width non-degenerate.
+        const it::Plan p22noLfe = it::makePlan(24, {}, {}, 48000, 1.0);
+        check(it::firstDuplicateSlotPair(p22noLfe).first < 0,
+              "24 slots with NO lfe indices are unique");
+        const auto c22n = it::renderPlan(p22noLfe);
+        const it::RoutingReport rn = it::detectRouting(join(c22n, 48000.0), p22noLfe);
+        check(rn.error.empty() && rn.ok && rn.identityCount == 24,
+              "the same width still verifies clean when the tones are unique");
+
+        // Every other shipped layout declares exactly ONE LFE slot, so the guard must not fire.
+        for (int n : {6, 8, 10, 12, 16}) {
+            const it::Plan p = it::makePlan(n, {3}, {}, 48000, 1.0);
+            check(it::firstDuplicateSlotPair(p).first < 0,
+                  "width " + std::to_string(n) +
+                      " with a single LFE slot is NOT degenerate");
+            const it::RoutingReport r = it::detectRouting(join(it::renderPlan(p), 48000.0), p);
+            check(r.error.empty() && r.ok,
+                  "width " + std::to_string(n) + " single-LFE still verifies clean");
+        }
+
+        // constantHz — P-151.6's authoring half, measured on the plan rather than on prose.
+        const it::Plan pc = it::makePlan(8, {3}, {}, 48000, 1.0, -18.0, true, /*constantHz*/ 1000.0);
+        check(std::abs(pc.constantHz - 1000.0) < 1e-9, "constantHz is recorded on the plan");
+        bool allConst = true, lfeStillFlagged = false;
+        for (const auto& s : pc.slots) {
+            if (std::abs(s.hz - 1000.0) > 1e-9) allConst = false;
+            if (s.index == 3 && s.lfe) lfeStillFlagged = true;
+        }
+        check(allConst, "constantHz: EVERY slot carries the one frequency, LFE included");
+        check(lfeStillFlagged,
+              "constantHz overrides the LFE FREQUENCY but not the lfe FLAG — the plan still says "
+              "which slot is the LFE, so the override is visible rather than silent");
+        check(it::firstDuplicateSlotPair(pc).first == 0 &&
+                  it::firstDuplicateSlotPair(pc).second == 1,
+              "constantHz makes the plan degenerate from slot 0");
+        const it::RoutingReport rc = it::detectRouting(join(it::renderPlan(pc), 48000.0), pc);
+        check(!rc.error.empty() && !rc.ok && rc.perChannel.empty(),
+              "constantHz material is REFUSED by the routing detector, by construction");
+
+        // Omitting constantHz must change nothing at all — the byte-identity half of P-151.5,
+        // checked here where it is free rather than only over the wire.
+        const it::Plan pOff = it::makePlan(8, {3}, {}, 48000, 1.0, -18.0, true);
+        const it::Plan pOffExplicitZero =
+            it::makePlan(8, {3}, {}, 48000, 1.0, -18.0, true, /*constantHz*/ 0.0);
+        const std::string wOff =
+            loomb::writeWavPcm(it::renderPlan(pOff), pOff.frames(), 48000, 24);
+        const std::string wZero = loomb::writeWavPcm(it::renderPlan(pOffExplicitZero),
+                                                     pOffExplicitZero.frames(), 48000, 24);
+        check(wOff == wZero && it::contentTag(wOff) == it::contentTag(wZero),
+              "P-151.5: the default path is byte-identical and keeps its content-addressed name");
+        // Negative control: the check above must be able to fail.
+        const it::Plan pOn = it::makePlan(8, {3}, {}, 48000, 1.0, -18.0, true, 1000.0);
+        const std::string wOn = loomb::writeWavPcm(it::renderPlan(pOn), pOn.frames(), 48000, 24);
+        check(it::contentTag(wOn) != it::contentTag(wOff),
+              "P-151.5 negative control: turning constantHz ON does move the bytes and the name");
     }
 
     if (g_failures) {

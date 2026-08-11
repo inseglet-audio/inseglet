@@ -286,7 +286,7 @@
 // Groove/quantize (midi.*) reuse the already-imported MIDI CRUD (MIDI_Get/SetNote, PPQ<->QN,
 // MIDI_CountEvts, MIDI_Sort) — no new primitives. Takes/comping and transport extras add:
 #define REAPERAPI_WANT_AddTakeToMediaItem       // take.add — append an empty take to an item
-// --- B4 (doc 135): spatial.inject_identity_tones needs to put a FILE's audio into the
+// --- B4: spatial.inject_identity_tones needs to put a FILE's audio into the
 // session. Measured 2026-08-05: no verb could — item.add creates an EMPTY item and neither
 // PCM_Source nor InsertMedia appeared anywhere in src/. These two are that gap, and nothing
 // else uses them. If either fails to resolve the verb falls back to author-only mode.

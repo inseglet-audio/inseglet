@@ -1,38 +1,35 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.9.0
+@version 1.10.0
 @author James Livingston
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  Correctness release: 7.1.2 bed loudness, the identity-tone cache, and a routing
-  detector that had been reporting false faults on 22.2. Surface UNCHANGED (190 tools /
-  3 resources / 5 prompts) - this release adds one parameter and no verbs.
-  analysis.verify_routing gave FALSE VERDICTS on 22.2. 22.2 is the only bed layout
-  declaring two LFE slots, and the plan put the one 40 Hz LFE tone on both, so the tone set
-  was not unique. A PERFECTLY ROUTED 24-channel render came back ok=false, with channel 3
-  "bleed" at a margin of exactly 0.000000000 dB and channel 9 "duplicated", both at
-  planCoverage 1.000000 - nothing in the numbers signalled it. Reaching it required doing
-  exactly what the tool's own description instructs (passing back the echoed lfeChannels);
-  with them omitted the same width read a clean 24/24, which is why it went unseen. The
-  detector now REFUSES a degenerate plan outright and returns NO per-channel verdicts,
-  rather than attaching a warning to a wrong answer.
-  7.1.2 beds received NO BS.1770-4 channel weights, reading 0.350 LU LOW. bedChannelLabels()
-  enumerated cases 1/2/6/8/12/16 with no case 10, while the LFE predicate beside it
-  generalised - so a layout the product accepts silently lost its weights while reporting
-  "multichannel". 7.1.2 is the default bedLayout in three spatial tool schemas, and the
-  bed.expectLufs claim consumed by iamf-sentinel-pro's intent-compare inherited the error.
-  spatial.inject_identity_tones advertised "7.1.2" in its own schema enum and then refused it
-  at runtime. Every bed-layout width now derives from ONE canonical table; five hand-rolled
-  per-consumer width mappings are deleted. A registry-walking guard asserts that every layout
-  any tool advertises is accepted at runtime, so a tool written later is covered by default.
-  spatial.inject_identity_tones served STALE AUDIO after a parameter change. Files were named
-  by slot index alone, so two calls with different parameters shared one path; REAPER installs
-  a per-path PCM cache on the second access, and from then on a rewrite of that path is
-  invisible - the tool reported the parameters it was asked for while REAPER played the
-  earlier audio. Filenames now carry a hash of the WAV bytes, so identical parameters still
-  give identical paths (determinism holds, and the cache hit is then correct) while different
-  parameters can no longer collide at all.
-  NEW: spatial.inject_identity_tones gains constantHz - one frequency on every slot, LFE
-  included, so a multichannel fixture can hold a single frequency. The 313 + 139k plan cannot
-  express that. A plan carrying it is a level instrument, not a routing one, and the routing
-  detector refuses it by construction.
+  Correctness release: our BS.1770-4 RLB filter was non-conformant, and every loudness figure
+  Inseglet has ever reported read LOW by a constant. Surface UNCHANGED (190 tools /
+  3 resources / 5 prompts) - no new verbs, no new parameters.
+  *** THIS BREAKS NUMERIC COMPARABILITY WITH v1.9.0 AND EARLIER for ABSOLUTE loudness. ***
+  Figures reported by any prior release are low by 0.047099 / 0.043277 / 0.023566 / 0.021652 LU
+  at 44.1 / 48 / 88.2 / 96 kHz. RELATIVE quantities - channel balances, deltas, ratios, LRA,
+  activity fractions - are unaffected, because the correction is a pure gain at every frequency
+  and the shift cancels. Add the constant for your sample rate to compare archived absolute
+  figures against v1.10.0 output.
+  The K-weighting stage-2 (RLB) highpass divided its numerator by a0, forcing the passband gain
+  to exactly 1.000000000000. BS.1770-4 Table 1 keeps that numerator as exactly [1, -2, 1] - it
+  is not normalised - and its gain is a0 = 1.004994898715 at 48 kHz. The -0.691 calibration
+  term is defined against the TABULATED filter, so the normalised form read low by the constant
+  above at every frequency. Moved by the fix: analysis.meter's channelsDetail[].kLevelLkfs,
+  accessor_meter, object_loudness, stem_loudness, dialog_loudness, downmix_loudness,
+  gatedLoudness() and the intent sidecar's expectLufs claims.
+  The K-weighting shelf gain constant was also truncated to 12 significant digits where the
+  reference carries 16, reaching b1 as a 1.044942e-12 error against Table 1. Worth about
+  3.3e-12 LU - below every measurement - but it was the whole of a discrepancy that had been
+  attributed to the table's own precision rather than to us.
+  Verified live against a running REAPER on 28 windows: the shift reproduced to 3.5e-12 LU and
+  the cross-engine residual column came back invariant to 3.5e-12 LU. Cross-checked against a
+  second independent BS.1770-4 implementation on 13 rows: the two now agree to 1.7799e-12 LU,
+  where before the fix they differed by exactly the constant above - with Inseglet on the low
+  side and the other implementation conformant.
+  unit.meter now gates all five coefficients of BOTH filter stages against Table 1 at 1e-12,
+  with a negative control that rejects the pre-fix numerator. The previous check gated the
+  K-curve against flatness at 1 kHz to +/- 1.2 dB, which is 28x too loose to see a 0.043 dB
+  error.

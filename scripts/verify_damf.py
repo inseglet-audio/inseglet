@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live-verify Batch A (moat-depth) — native Dolby Atmos Master File (DAMF) triad authoring.
+"""Live-verify Batch A — native Dolby Atmos Master File (DAMF) triad authoring.
 
 Exercises, end-to-end on the real SDK path:
   * spatial.export_damf   — render a DirectSpeakers bed + mono object stems and author the DAMF triad

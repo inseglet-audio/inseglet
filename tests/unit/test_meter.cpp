@@ -183,6 +183,62 @@ int main() {
         check(near(m2.kLevelLkfs - m1k.kLevelLkfs, 6.02, 0.05), "doubling amplitude: +6 dB K-level");
     }
 
+    // ---- 4b. F-156.1: the K-weighting biquads must match BS.1770-4 Table 1 ----
+    // Section 4 above gates the K-curve against FLATNESS at 1 kHz to +/- 1.2 dB. That is 28x
+    // too loose to see a 0.043 dB error, which is how the RLB numerator sat non-conformant
+    // through every prior release. A conformance check must gate against the TABLE, not
+    // against a property the wrong filter also has.
+    {
+        // BS.1770-4 Table 1, the tabulated 48 kHz coefficients, quoted to the 15 significant
+        // digits the table prints. The table's own truncation floor is ~1e-12, so that is the
+        // tolerance -- stating the source's precision beside the tolerance, because a
+        // threshold set below the data's precision reports a difference that is not there.
+        const double kT1Tol = 1e-12;
+        const Biquad sh = k1ShelfBiquad(48000.0);
+        check(near(sh.b0,  1.53512485958697, kT1Tol), "Table 1: shelf b0");
+        check(near(sh.b1, -2.69169618940638, kT1Tol), "Table 1: shelf b1");
+        check(near(sh.b2,  1.19839281085285, kT1Tol), "Table 1: shelf b2");
+        check(near(sh.a1, -1.69065929318241, kT1Tol), "Table 1: shelf a1");
+        check(near(sh.a2,  0.73248077421585, kT1Tol), "Table 1: shelf a2");
+
+        const Biquad hp = k2HighpassBiquad(48000.0);
+        check(near(hp.b0,  1.0,              kT1Tol), "Table 1: RLB b0 is 1 (NOT 1/a0)");
+        check(near(hp.b1, -2.0,              kT1Tol), "Table 1: RLB b1 is -2 (NOT -2/a0)");
+        check(near(hp.b2,  1.0,              kT1Tol), "Table 1: RLB b2 is 1 (NOT 1/a0)");
+        check(near(hp.a1, -1.99004745483398, kT1Tol), "Table 1: RLB a1");
+        check(near(hp.a2,  0.99007225036621, kT1Tol), "Table 1: RLB a2");
+
+        // The mechanism, asserted as a relationship rather than as a literal: the tabulated
+        // RLB's gain at z = -1 is exactly a0, because the numerator is not divided by it.
+        const double f0 = 38.13547087602444, Q = 0.5003270373238773;
+        const double K = std::tan(M_PI * f0 / 48000.0);
+        const double a0 = 1.0 + K / Q + K * K;
+        const double den = 1.0 - hp.a1 + hp.a2;
+        check(near((hp.b0 - hp.b1 + hp.b2) / den, a0, kT1Tol), "RLB passband gain is a0");
+
+        // NEGATIVE CONTROL. Rebuild the pre-F-156.1 form and prove this check REJECTS it.
+        // A conformance check that cannot fail the known-bad filter is not a check --
+        // it can only agree, and a control that can only agree is not a control.
+        const double oldGain = ((1.0 / a0) - (-2.0 / a0) + (1.0 / a0)) / den;
+        check(near(oldGain, 1.0, kT1Tol), "control: the OLD normalised RLB gain was exactly 1.0");
+        check(!near(1.0 / a0, 1.0, kT1Tol), "control: this check REJECTS the pre-fix numerator");
+        check(near(20.0 * std::log10(a0 / oldGain), 0.04327714626081623, 1e-9),
+              "control: F-156.1 was worth 0.043277 LU at 48 kHz");
+
+        // And the offset at every rate the product supports, so a regression names its own
+        // magnitude. Values recorded in doc 156 and re-derived in preregistration 158.
+        const struct { double fs; double lu; const char* name; } kRates[] = {
+            {44100.0, 0.047099, "44.1 kHz"}, {48000.0, 0.043277, "48 kHz"},
+            {88200.0, 0.023566, "88.2 kHz"}, {96000.0, 0.021652, "96 kHz"},
+        };
+        for (const auto& r : kRates) {
+            const Biquad q = k2HighpassBiquad(r.fs);
+            const double g = (q.b0 - q.b1 + q.b2) / (1.0 - q.a1 + q.a2);
+            check(near(20.0 * std::log10(g), r.lu, 5e-7),
+                  std::string("RLB passband gain in LU at ") + r.name);
+        }
+    }
+
     // ---- 5. inter-channel correlation ----
     {
         AudioBuffer b = makeBuffer(3, sr, N);

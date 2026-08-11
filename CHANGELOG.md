@@ -6,6 +6,47 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.10.0] — 2026-08-11
+
+A correctness release. The surface is unchanged at **190 tools / 3 resources / 5 prompts** —
+no new verbs, no new parameters. Released as a **minor** rather than a patch because reported
+values move.
+
+> ⚠️ **Absolute loudness figures are not numerically comparable with v1.9.0 and earlier.**
+> Figures reported by any prior release are low by **0.047099 / 0.043277 / 0.023566 /
+> 0.021652 LU** at 44.1 / 48 / 88.2 / 96 kHz. **Relative** quantities — channel balances,
+> deltas, ratios, LRA, activity fractions — are unaffected: the correction is a pure gain at
+> every frequency, so the shift cancels. To compare archived absolute figures against v1.10.0
+> output, add the constant for your sample rate.
+
+### Fixed
+
+- **The BS.1770-4 RLB filter was non-conformant, and every per-channel loudness figure read
+  low by a constant.** The K-weighting stage-2 highpass divided its numerator by `a0`, forcing
+  the passband gain to exactly `1.000000000000`. BS.1770-4 Table 1 keeps that numerator as
+  exactly `[1, -2, 1]` — it is not normalised — and its gain is `a0` = `1.004994898715` at
+  48 kHz. The `-0.691` calibration term is defined against the *tabulated* filter, so the
+  normalised form read low at every frequency. Moved by the fix: `analysis.meter`'s
+  `channelsDetail[].kLevelLkfs`, `accessor_meter`, `object_loudness`, `stem_loudness`,
+  `dialog_loudness`, `downmix_loudness`, `gatedLoudness()`, and the intent sidecar's
+  `expectLufs` claims.
+- **The K-weighting shelf gain constant was truncated to 12 significant digits** where the
+  reference carries 16, reaching `b1` as a `1.044942e-12` error against Table 1. Worth about
+  `3.3e-12` LU — below every measurement — but it accounted for the whole of a discrepancy
+  that had been attributed to the table's own precision rather than to this code.
+
+### Verified
+
+- Live against a running REAPER on 28 windows: the shift reproduced to `3.5e-12` LU, and the
+  cross-engine residual column came back invariant to `3.5e-12` LU.
+- Cross-checked against a second, independent BS.1770-4 implementation on 13 rows: the two
+  now agree to `1.7799e-12` LU, where before the fix they differed by exactly the constant
+  above — with this implementation on the low side and the other one conformant.
+- `unit.meter` now gates all five coefficients of **both** filter stages against Table 1 at
+  `1e-12`, with a negative control that rejects the pre-fix numerator. The previous check
+  gated the K-curve against flatness at 1 kHz to ±1.2 dB, which is 28× too loose to see a
+  0.043 dB error.
+
 ## [1.9.0] — 2026-08-11
 
 A correctness release. No new tools: the surface is unchanged at **190 tools / 3 resources /

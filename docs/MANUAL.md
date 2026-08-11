@@ -1,6 +1,6 @@
 % Inseglet — User Manual
 % A native REAPER extension exposing a Model Context Protocol interface
-% Version 1.9.0 · 2026
+% Version 1.10.0 · 2026
 
 ---
 
@@ -13,8 +13,19 @@ This manual covers installation, connecting a client, the concepts you need, a c
 server can do, worked examples, and troubleshooting. For the exhaustive, machine-generated schema of
 every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from the live registry).
 
-> This document is written for v1.9.0. Inseglet currently targets **macOS first**;
+> This document is written for v1.10.0. Inseglet currently targets **macOS first**;
 > Windows and Linux build in CI and follow once load-verified in a real REAPER.
+>
+> ⚠️ **Absolute loudness figures are not numerically comparable with v1.9.0 and
+> earlier.** v1.10.0 corrects a non-conformant BS.1770-4 RLB filter: our stage-2
+> numerator was divided by `a0`, where Table 1 keeps it as exactly `[1, -2, 1]`. Every
+> per-channel and integrated loudness figure reported by a prior release is therefore
+> **low by a constant** — 0.047099 / 0.043277 / 0.023566 / 0.021652 LU at
+> 44.1 / 48 / 88.2 / 96 kHz. The correction is a **pure gain at every frequency**, so
+> **relative** quantities — channel balances, deltas, ratios, LRA, activity fractions —
+> are unaffected: the shift cancels. If you have archived absolute LUFS/LKFS numbers
+> from v1.9.0 or earlier, add the constant for your sample rate to compare them with
+> v1.10.0 output.
 
 ---
 

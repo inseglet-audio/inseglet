@@ -415,6 +415,65 @@ int main() {
               "jsonEscape round-trips quotes/backslash/newline");
     }
 
+    // ==== F-160.5 / DIRECTIVE 70 — the render-silence classifier ====
+    // The fail-open's whole mechanism is that -120/-70/0 is the arithmetic image of an
+    // identically-zero channel rather than a measurement of one. These pin BOTH halves: the
+    // floors are exact constants, and the classifier separates "nothing rendered" from the
+    // legitimate partially-silent deliverable that the -70 floor exists to serve.
+    {
+        const int rate = 48000;
+        const std::vector<float> zero(rate, 0.0f);
+        std::vector<float> tone(rate, 0.0f);
+        for (int i = 0; i < rate; ++i)
+            tone[(size_t)i] = 0.25f * std::sin(2.0 * 3.14159265358979323846 * 1000.0 * i / rate);
+
+        // --- P-162.0: the floor triple is EXACT, not approximate. No tolerance: these are
+        // returned constants, so anything but bit equality means the mechanism moved.
+        check(intent::rmsDb(zero) == -120.0, "rmsDb(all-zero) is EXACTLY -120.0");
+        check(intent::clampLufs(-144.0) == -70.0, "clampLufs floors EXACTLY at -70.0");
+        check(intent::activeFraction(zero, rate) == 0.0, "activeFraction(all-zero) is EXACTLY 0.0");
+        check(intent::rmsDb(std::vector<float>()) == -120.0, "rmsDb(empty) is -120.0 too");
+
+        // --- the classifier: all-zero IS the refusable condition
+        intent::RenderSilence all = intent::classifyRenderSilence({zero, zero, zero});
+        check(all.allZero && all.channels == 3 && all.zeroChannels == 3,
+              "all-zero image classifies as allZero");
+
+        // --- THE OVER-REACH CONTROL (directive 64). The live fixture B is a legitimate
+        // 7.1.4 deliverable with ONE channel fed: eleven of its twelve channels sit on the exact
+        // floor triple. If a single fed channel does not clear the refusal, the guard eats real
+        // work. This is the assertion that can actually kill the design.
+        std::vector<std::vector<float>> partial(12, zero);
+        partial[0] = tone;
+        intent::RenderSilence part = intent::classifyRenderSilence(partial);
+        check(!part.allZero, "ONE fed channel out of twelve is NOT allZero");
+        check(part.channels == 12 && part.zeroChannels == 11,
+              "partial census counts 11/12 zero channels");
+        check(intent::rmsDb(partial[1]) == -120.0 && intent::rmsDb(partial[0]) != -120.0,
+              "the eleven silent channels still read the floor legitimately");
+
+        // --- degenerate shapes
+        check(!intent::classifyRenderSilence({}).allZero, "no channels is NOT allZero");
+        check(intent::classifyRenderSilence({tone}).zeroChannels == 0, "a fed channel is not zero");
+
+        // --- a single non-zero SAMPLE anywhere clears it: the rule is exact zero, not a threshold.
+        // A threshold here would be a level judgement, and the tool has no standing to make one.
+        std::vector<float> oneTick(rate, 0.0f);
+        oneTick[rate / 2] = 1e-9f;
+        check(!intent::classifyRenderSilence({oneTick, zero}).allZero,
+              "one 1e-9 sample clears allZero — exact zero, never a threshold");
+
+        // --- the refusal text carries the census and names both the remedy and the escape hatch
+        const std::string d = intent::renderSilenceDetail(all);
+        const std::string r = intent::renderSilenceRemedy();
+        check(d.find("3 channels") != std::string::npos, "detail names the channel count");
+        check(d.find("never happened") != std::string::npos,
+              "detail states the tool cannot distinguish the two cases");
+        check(r.find("allowSilent") != std::string::npos, "remedy names the escape hatch");
+        check(r.find("accessor_meter") != std::string::npos,
+              "remedy points at the device-independent accessor path");
+    }
+
     if (g_failures) {
         std::fprintf(stderr, "%d FAILURE(S)\n", g_failures);
         return 1;

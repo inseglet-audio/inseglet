@@ -177,7 +177,7 @@ inline Biquad k1ShelfBiquad(double fs) {
     const double f0 = 1681.9744509555319;
     // F-158.2: this was 3.99984385397 (12 significant digits). The reference value carries
     // 16, and the truncation propagated into b1 = 2(K^2 - Vh)/a0 as a 1.044942e-12 error
-    // against Table 1 -- which is exactly the "1.045e-12 shelf agreement" doc 156 recorded
+    // against Table 1 -- which is exactly the "1.045e-12 shelf agreement" recorded earlier
     // and attributed to the TABLE's own precision. It was ours, not the table's.
     const double G = 3.999843853973347;   // dB
 

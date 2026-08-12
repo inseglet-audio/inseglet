@@ -1,6 +1,6 @@
 % Inseglet — User Manual
 % A native REAPER extension exposing a Model Context Protocol interface
-% Version 1.10.0 · 2026
+% Version 1.11.0 · 2026
 
 ---
 
@@ -13,8 +13,16 @@ This manual covers installation, connecting a client, the concepts you need, a c
 server can do, worked examples, and troubleshooting. For the exhaustive, machine-generated schema of
 every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from the live registry).
 
-> This document is written for v1.10.0. Inseglet currently targets **macOS first**;
+> This document is written for v1.11.0. Inseglet currently targets **macOS first**;
 > Windows and Linux build in CI and follow once load-verified in a real REAPER.
+>
+> ⚠️ **Breaking in v1.11.0: `spatial.export_adm`, `spatial.export_damf` and
+> `spatial.export_loom_manifest` now refuse an all-silent render.** If every sample of
+> every channel is exactly zero, the tool returns a `render_silent` error and writes
+> nothing, because that is indistinguishable from a render that never happened. To author a
+> deliberately silent deliverable, pass **`allowSilent: true`** — which reproduces the
+> pre-v1.11.0 bytes exactly. One non-zero sample anywhere clears the guard; it is an
+> exact-zero test, not a loudness threshold.
 >
 > ⚠️ **Absolute loudness figures are not numerically comparable with v1.9.0 and
 > earlier.** v1.10.0 corrects a non-conformant BS.1770-4 RLB filter: our stage-2

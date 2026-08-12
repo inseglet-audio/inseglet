@@ -6,6 +6,37 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.11.0] — 2026-08-12
+
+The export tools can now **fail to measure**. The surface is unchanged at **190 tools /
+3 resources / 5 prompts**, but three tools gain one parameter — a schema change the
+tool-count triple cannot see.
+
+### Fixed
+
+- **`spatial.export_adm`, `spatial.export_damf` and `spatial.export_loom_manifest` authored
+  deliverables from renders that never happened.** All three read a render in which *every
+  sample of every channel* was exactly zero and emitted a complete, well-formed,
+  permanently archivable file whose loudness claims were the arithmetic image of "no
+  samples": `-120` dB RMS, a `-70` LUFS floor, `0.0` active fraction. The previous
+  `render_empty` guard only ever caught a render of zero *length*. All three now refuse
+  with a named `render_silent` error and **write nothing**.
+  ⚠️ **BREAKING: authoring a deliberately silent master now requires `allowSilent: true`**,
+  which reproduces the previous bytes exactly — verified byte-identical on three fixtures.
+- **The guard is the whole image, never a threshold.** A legitimate 7.1.4 deliverable with a
+  single channel fed has **eleven of twelve** channels on the exact floor triple, so a
+  per-channel rule would reject real work. One `1e-9` sample clears it: whether a quiet
+  master is too quiet is not this tool's judgement to make, and the `-70` floor is correct.
+- **It was never one site.** `export_damf` authored its triad from the same unmeasured
+  render, and `export_loom_manifest` emitted the same floor triple through
+  `intentFillLevels` / `intentBedLufs` plus a whole-bed `expectLufs: -70`.
+
+### Documentation
+
+- **`docs/REFERENCE.md` regenerated.** `allowSilent` had existed in three tools' input
+  schemas and in no user-facing document, because the standing surface gate counts tools,
+  resources and prompts — a new *parameter* is invisible to it.
+
 ## [1.10.0] — 2026-08-11
 
 A correctness release. The surface is unchanged at **190 tools / 3 resources / 5 prompts** —

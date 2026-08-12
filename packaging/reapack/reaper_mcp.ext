@@ -1,35 +1,26 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.10.0
+@version 1.11.0
 @author James Livingston
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  Correctness release: our BS.1770-4 RLB filter was non-conformant, and every loudness figure
-  Inseglet has ever reported read LOW by a constant. Surface UNCHANGED (190 tools /
-  3 resources / 5 prompts) - no new verbs, no new parameters.
-  *** THIS BREAKS NUMERIC COMPARABILITY WITH v1.9.0 AND EARLIER for ABSOLUTE loudness. ***
-  Figures reported by any prior release are low by 0.047099 / 0.043277 / 0.023566 / 0.021652 LU
-  at 44.1 / 48 / 88.2 / 96 kHz. RELATIVE quantities - channel balances, deltas, ratios, LRA,
-  activity fractions - are unaffected, because the correction is a pure gain at every frequency
-  and the shift cancels. Add the constant for your sample rate to compare archived absolute
-  figures against v1.10.0 output.
-  The K-weighting stage-2 (RLB) highpass divided its numerator by a0, forcing the passband gain
-  to exactly 1.000000000000. BS.1770-4 Table 1 keeps that numerator as exactly [1, -2, 1] - it
-  is not normalised - and its gain is a0 = 1.004994898715 at 48 kHz. The -0.691 calibration
-  term is defined against the TABULATED filter, so the normalised form read low by the constant
-  above at every frequency. Moved by the fix: analysis.meter's channelsDetail[].kLevelLkfs,
-  accessor_meter, object_loudness, stem_loudness, dialog_loudness, downmix_loudness,
-  gatedLoudness() and the intent sidecar's expectLufs claims.
-  The K-weighting shelf gain constant was also truncated to 12 significant digits where the
-  reference carries 16, reaching b1 as a 1.044942e-12 error against Table 1. Worth about
-  3.3e-12 LU - below every measurement - but it was the whole of a discrepancy that had been
-  attributed to the table's own precision rather than to us.
-  Verified live against a running REAPER on 28 windows: the shift reproduced to 3.5e-12 LU and
-  the cross-engine residual column came back invariant to 3.5e-12 LU. Cross-checked against a
-  second independent BS.1770-4 implementation on 13 rows: the two now agree to 1.7799e-12 LU,
-  where before the fix they differed by exactly the constant above - with Inseglet on the low
-  side and the other implementation conformant.
-  unit.meter now gates all five coefficients of BOTH filter stages against Table 1 at 1e-12,
-  with a negative control that rejects the pre-fix numerator. The previous check gated the
-  K-curve against flatness at 1 kHz to +/- 1.2 dB, which is 28x too loose to see a 0.043 dB
-  error.
+  Guard release: the ADM, DAMF and Loom export tools can now FAIL TO MEASURE. All three
+  used to author a complete deliverable from a render in which every sample of every
+  channel was exactly zero, stamping loudness claims that were just the arithmetic image
+  of "no samples" (-120 dB RMS, a -70 LUFS floor, 0.0 active fraction). The old
+  render_empty guard only caught a render of zero LENGTH.
+  *** BREAKING: authoring a deliberately silent master now needs allowSilent:true. ***
+  Passing allowSilent reproduces the previous bytes EXACTLY - the escape hatch is the old
+  behaviour, verified byte-identical on three fixtures.
+  Surface is unchanged at 190 tools / 3 resources / 5 prompts, but THREE TOOLS GAIN ONE
+  PARAMETER - a schema change the tool-count triple cannot see.
+  The test is exact zero on every sample of every channel, never a threshold: a real 7.1.4
+  deliverable with one channel fed has ELEVEN of twelve channels on the same floor triple,
+  so a per-channel rule would reject real work. One 1e-9 sample clears the guard. Whether a
+  quiet master is too quiet is not this tool's judgement to make, and the -70 floor is
+  correct and stays.
+  It was never one site: export_damf authored its triad from the same unmeasured render,
+  and export_loom_manifest emitted the same floor triple through intentFillLevels /
+  intentBedLufs plus a whole-bed expectLufs of -70. Measured pre-fix on all three.
+  docs/REFERENCE.md is regenerated: allowSilent had existed in three input schemas and in
+  no user-facing document, because the surface gate counts tools, not parameters.

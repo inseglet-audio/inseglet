@@ -3344,6 +3344,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
             "intentSidecar":{"type":"boolean","default":false},
+            "allowSilent":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
@@ -3362,6 +3363,7 @@ void registerSpatialTools(ToolRegistry& reg) {
         [](const Json& a) -> Json {
             const bool dryRun = optBool(a, "dryRun", false);
             const bool wantIntent = optBool(a, "intentSidecar", false);
+            const bool allowSilent = optBool(a, "allowSilent", false);   // directive 70
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.2");
             const std::string coordMode = optStr(a, "coordinateMode", "spherical");
             const adm::Coord coord = (coordMode == "cartesian") ? adm::Coord::Cartesian
@@ -3662,6 +3664,23 @@ void registerSpatialTools(ToolRegistry& reg) {
                 return makeError("render_empty", "the render produced no audio",
                                  "bound the export to audio (boundsFlag=0 + startPos/endPos) and check "
                                  "the bed/object tracks route audio");
+
+            // ---- F-160.5 / DIRECTIVE 70: refuse to author a claim we did not measure.
+            // `render_empty` above catches a render of zero LENGTH. An all-zero render of non-zero
+            // length walked straight past it and became a permanent ADM BWF + sidecar asserting
+            // silence on every channel, ok:true, no warning. The tool cannot tell "the content is
+            // silent" from "nothing rendered", so it must say so and stop. allowSilent is how the
+            // human supplies the information the tool does not have.
+            const intent::RenderSilence sil = intent::classifyRenderSilence(channels);
+            if (sil.allZero && !allowSilent)
+                return makeError("render_silent", intent::renderSilenceDetail(sil),
+                                 intent::renderSilenceRemedy());
+            if (sil.allZero)
+                warnings.push_back("allowSilent: every one of the " + std::to_string(sil.channels) +
+                                   " rendered channels is digital silence; the deliverable was "
+                                   "authored anyway and its level claims assert silence — which is "
+                                   "what allowSilent asked for.");
+
             if (sampleRate <= 0) sampleRate = 48000.0;
             m.sampleRate = (int)std::llround(sampleRate);
             m.durationSec = (double)frames / sampleRate;
@@ -3765,7 +3784,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             return ret;
 #else
             (void)coord; (void)blockMs; (void)maxBlocks; (void)boundsFlag; (void)bitDepth;
-            (void)wantDbmd; (void)dolbyMetaMode;
+            (void)wantDbmd; (void)dolbyMetaMode; (void)allowSilent;
             Json objReport = Json::array();
             for (size_t j = 0; j < objTracks.size(); ++j)
                 objReport.push_back(Json{{"track", objTracks[j]}, {"name", "Object " + std::to_string(j + 1)},
@@ -3834,6 +3853,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             "boundsFlag":{"type":"integer","minimum":0,"maximum":7,"default":1},
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
+            "allowSilent":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
@@ -3849,6 +3869,7 @@ void registerSpatialTools(ToolRegistry& reg) {
         Profile::Render,
         [](const Json& a) -> Json {
             const bool dryRun = optBool(a, "dryRun", false);
+            const bool allowSilent = optBool(a, "allowSilent", false);   // directive 70
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.2");
             int bitDepth = optInt(a, "bitDepth", 24);
             if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32) bitDepth = 24;
@@ -4045,6 +4066,20 @@ void registerSpatialTools(ToolRegistry& reg) {
                 return makeError("render_empty", "the render produced no audio",
                                  "bound the export to audio (boundsFlag=0 + startPos/endPos) and check "
                                  "the bed/object tracks route audio");
+
+            // ---- F-160.5 / DIRECTIVE 70. The finding named only export_adm; the fail-open
+            // is a CLASS. DAMF writes no intent sidecar, so it authors no false LEVEL claim — but
+            // it still writes a permanent three-file deliverable out of a render that may never
+            // have happened. Same refusal, same escape hatch, one shared text.
+            const intent::RenderSilence sil = intent::classifyRenderSilence(channels);
+            if (sil.allZero && !allowSilent)
+                return makeError("render_silent", intent::renderSilenceDetail(sil),
+                                 intent::renderSilenceRemedy());
+            if (sil.allZero)
+                warnings.push_back("allowSilent: every one of the " + std::to_string(sil.channels) +
+                                   " rendered channels is digital silence; the DAMF triad was "
+                                   "authored anyway.");
+
             if (sampleRate <= 0) sampleRate = 48000.0;
             m.sampleRate = (int)std::llround(sampleRate);
             m.durationSec = (double)frames / sampleRate;
@@ -4165,6 +4200,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
             "intentSidecar":{"type":"boolean","default":false},
+            "allowSilent":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
@@ -4183,6 +4219,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             namespace lb = loomb;
             const bool dryRun = optBool(a, "dryRun", false);
             const bool wantIntent = optBool(a, "intentSidecar", false);
+            const bool allowSilent = optBool(a, "allowSilent", false);   // directive 70
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.4");
             int bitDepth = optInt(a, "bitDepth", 24);
             if (bitDepth != 16 && bitDepth != 24) bitDepth = 24;
@@ -4489,6 +4526,26 @@ void registerSpatialTools(ToolRegistry& reg) {
                 return makeError("render_empty", "the render produced no audio",
                                  "bound the export to audio (boundsFlag=0 + startPos/endPos) and "
                                  "check the source tracks route audio");
+
+            // ---- F-160.5 / DIRECTIVE 70. The third site of the class, and the one the
+            // original finding came closest to missing: this path writes an intent sidecar through the
+            // SAME intentFillLevels/intentBedLufs, so an all-zero render here produces a whole-bed
+            // `expectLufs: -70` on top of the per-channel floor triple. Measured pre-fix on a
+            // 7.1.4 fixture: ok:true, warnings [], 12/12 channels at the floor. The census is
+            // taken across EVERY stem (bed + scene + VO), because a deliverable is silent only if
+            // all of it is.
+            std::vector<std::vector<float>> allStemCh;
+            for (const StemOut& s : stems)
+                for (const std::vector<float>& c : s.ch) allStemCh.push_back(c);
+            const intent::RenderSilence sil = intent::classifyRenderSilence(allStemCh);
+            if (sil.allZero && !allowSilent)
+                return makeError("render_silent", intent::renderSilenceDetail(sil),
+                                 intent::renderSilenceRemedy());
+            if (sil.allZero)
+                warnings.push_back("allowSilent: every one of the " + std::to_string(sil.channels) +
+                                   " rendered channels across all stems is digital silence; the "
+                                   "manifest and its intent claims were authored anyway.");
+
             if (sampleRate <= 0) sampleRate = 48000.0;
             if ((int)std::llround(sampleRate) != 48000)
                 return makeError("sample_rate_not_48k",

@@ -19,6 +19,29 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.11.0" author="James Livingston" time="2026-08-12T00:00:00Z">
+        <changelog><![CDATA[Guard release: the ADM, DAMF and Loom export tools can now FAIL TO MEASURE. All three
+used to author a complete deliverable from a render in which every sample of every channel
+was exactly zero, stamping loudness claims that were just the arithmetic image of "no
+samples" (-120 dB RMS, a -70 LUFS floor, 0.0 active fraction). The old render_empty guard
+only caught a render of zero LENGTH.
+*** BREAKING: authoring a deliberately silent master now needs allowSilent:true. ***
+Passing allowSilent reproduces the previous bytes EXACTLY - the escape hatch is the old
+behaviour, verified byte-identical on three fixtures.
+Surface is unchanged at 190 tools / 3 resources / 5 prompts, but THREE TOOLS GAIN ONE
+PARAMETER - a schema change the tool-count triple cannot see.
+The test is exact zero on every sample of every channel, never a threshold: a real 7.1.4
+deliverable with one channel fed has ELEVEN of twelve channels on the same floor triple, so
+a per-channel rule would reject real work. One 1e-9 sample clears the guard. Whether a quiet
+master is too quiet is not this tool's judgement to make, and the -70 floor is correct and
+stays.
+It was never one site: export_damf authored its triad from the same unmeasured render, and
+export_loom_manifest emitted the same floor triple through intentFillLevels / intentBedLufs
+plus a whole-bed expectLufs of -70. Measured pre-fix on all three.
+docs/REFERENCE.md is regenerated: allowSilent had existed in three input schemas and in no
+user-facing document, because the surface gate counts tools, not parameters.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.11.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.10.0" author="James Livingston" time="2026-08-11T00:00:00Z">
         <changelog><![CDATA[Correctness release: our BS.1770-4 RLB filter was non-conformant, and every loudness figure
 Inseglet has ever reported read LOW by a constant. Surface UNCHANGED (190 tools /

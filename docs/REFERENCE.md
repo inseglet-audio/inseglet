@@ -13267,6 +13267,7 @@ Author a native ITU-R BS.2076 ADM object-audio deliverable — a Broadcast-Wave 
 
 | Param | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `allowSilent` | boolean | no | default `false` |
 | `bedLayout` | enum | no | one of: `5.1`, `7.1`, `7.1.2`, `7.1.4`, `9.1.6`, `22.2`; default `"7.1.2"` |
 | `bedTrack` | integer | no | min 0 |
 | `bitDepth` | enum | no | one of: `16`, `24`, `32`; default `24` |
@@ -13300,6 +13301,10 @@ Returns a structured object with: `adm`, `bedChannels`, `bedLayout`, `bitDepth`,
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "allowSilent": {
+        "default": false,
+        "type": "boolean"
+      },
       "bedLayout": {
         "default": "7.1.2",
         "enum": [
@@ -13546,6 +13551,7 @@ Author a native Dolby Atmos Master File (DAMF) — the Dolby Atmos Renderer's tr
 
 | Param | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `allowSilent` | boolean | no | default `false` |
 | `bedLayout` | enum | no | one of: `5.1`, `7.1`, `7.1.2`; default `"7.1.2"` |
 | `bedTrack` | integer | no | min 0 |
 | `bitDepth` | enum | no | one of: `16`, `24`, `32`; default `24` |
@@ -13575,6 +13581,10 @@ Returns a structured object with: `basePath`, `bedChannels`, `bedLayout`, `bitDe
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "allowSilent": {
+        "default": false,
+        "type": "boolean"
+      },
       "bedLayout": {
         "default": "7.1.2",
         "enum": [
@@ -13752,6 +13762,7 @@ Export the session's immersive program as an iamf-loom package source: render th
 
 | Param | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `allowSilent` | boolean | no | default `false` |
 | `bedLayout` | enum | no | one of: `stereo`, `5.1`, `7.1.4`; default `"7.1.4"` |
 | `bedTrack` | integer | no | min 0 |
 | `bitDepth` | enum | no | one of: `16`, `24`; default `24` |
@@ -13785,6 +13796,10 @@ Returns a structured object with: `bitDepth`, `channels`, `detail`, `dryRun`, `d
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "allowSilent": {
+        "default": false,
+        "type": "boolean"
+      },
       "bedLayout": {
         "default": "7.1.4",
         "enum": [

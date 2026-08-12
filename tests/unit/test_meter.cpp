@@ -226,7 +226,7 @@ int main() {
               "control: F-156.1 was worth 0.043277 LU at 48 kHz");
 
         // And the offset at every rate the product supports, so a regression names its own
-        // magnitude. Values recorded in doc 156 and re-derived in preregistration 158.
+        // magnitude. Values recorded earlier and re-derived when the fix landed.
         const struct { double fs; double lu; const char* name; } kRates[] = {
             {44100.0, 0.047099, "44.1 kHz"}, {48000.0, 0.043277, "48 kHz"},
             {88200.0, 0.023566, "88.2 kHz"}, {96000.0, 0.021652, "96 kHz"},

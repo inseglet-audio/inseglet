@@ -221,6 +221,58 @@ inline double activeFraction(const std::vector<float>& x, int rate) {
 }
 
 // ============================================================================================
+// Render-silence classification (F-160.5, DIRECTIVE 70).
+//
+// The three functions directly above are the whole mechanism of the fail-open. On an
+// identically-zero channel rmsDb() returns EXACTLY -120.0, clampLufs() floors at EXACTLY -70.0
+// and activeFraction() returns EXACTLY 0.0 — so `-120 / -70 / 0` is not a measurement, it is the
+// arithmetic image of "no samples". Emitted into a sidecar it reads as the CLAIM "this content is
+// silent", which is indistinguishable from "nothing was rendered". That case was hit live:
+// twelve channels of confident silence, ok:true, no warning, while the accessor read the same
+// track fine. The condition was then shown to be TRANSIENT session state — so the artefact
+// outlives the thing that caused it. An authoring path must be able to say "I rendered nothing".
+//
+// ⚠️ THE DISCRIMINATOR IS THE WHOLE IMAGE, NEVER A SINGLE CHANNEL. The live fixture B is a
+// legitimate 7.1.4 deliverable with ONE channel fed, and ELEVEN of its twelve channels sit on the
+// exact floor triple — measured, not assumed. A per-channel rule would refuse real work. The
+// -70 floor exists precisely so silent bed channels are legal (the unfed C/LFE case, the false
+// S-344). Only "every sample of every channel is zero" separates the two cases.
+struct RenderSilence {
+    int channels = 0;        // channels examined
+    int zeroChannels = 0;    // channels whose every sample is exactly zero
+    bool allZero = false;    // ...and that is ALL of them (with at least one channel present)
+};
+
+inline RenderSilence classifyRenderSilence(const std::vector<std::vector<float>>& chans) {
+    RenderSilence v;
+    v.channels = (int)chans.size();
+    for (const std::vector<float>& c : chans) {
+        bool zero = true;
+        for (float s : c) {
+            if (s != 0.0f) { zero = false; break; }
+        }
+        if (zero) ++v.zeroChannels;
+    }
+    v.allZero = (v.channels > 0 && v.zeroChannels == v.channels);
+    return v;
+}
+
+// One refusal text shared by every authoring site, so the three cannot drift apart. It names the
+// condition, states plainly that the tool cannot tell the two cases apart, and points at the
+// accessor path — which was measured device-independent when the render path was dead.
+inline std::string renderSilenceDetail(const RenderSilence& v) {
+    return "the render produced " + std::to_string(v.channels) +
+           " channels of digital silence (every sample exactly zero); that is indistinguishable "
+           "from a render that never happened, so no deliverable was written";
+}
+inline std::string renderSilenceRemedy() {
+    return "confirm the export actually captures audio — bound it with boundsFlag=0 + startPos/"
+           "endPos, check the bed/object tracks route to the master, and read the tracks WITHOUT "
+           "rendering via analysis.accessor_meter (the accessor path survives a dead render path). "
+           "Pass allowSilent:true to author a deliberately silent deliverable anyway.";
+}
+
+// ============================================================================================
 // Trajectory sampling + decode prediction. The sampler is a cartesian-chord mirror of the
 // consumer's sample_trajectory (hold before the first point; chord-interpolate az/el/dist as
 // unit*dist vectors + gain between points; hold after the last).

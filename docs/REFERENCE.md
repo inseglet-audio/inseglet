@@ -1,9 +1,9 @@
 # REAPER MCP — Tool, Resource & Prompt Reference
 
-> **Generated** 2026-08-11 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
+> **Generated** 2026-08-14 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
 
 
-**Protocol:** MCP `2025-06-18` · **Surface:** 190 tools · 3 resources · 5 prompts.
+**Protocol:** MCP `2025-06-18` · **Surface:** 190 tools · 4 resources · 5 prompts.
 
 
 Tools are grouped by capability **profile**. Clients may negotiate a bounded profile set at `initialize` (to stay under LLM tool-count caps); `Profile::Full` (the default) exposes every tool. The always-on `tools.enumerate` meta-tool is visible under any profile.
@@ -14266,7 +14266,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `channels`, `channelsDetail`, `clamped`, `detail`, `downmix`, `dryRun`, `duration`, `error`, `frames`, `layout`, `loudness`, `measuredSource`, `plan`, `remediation`, `sampleRate`, `silent`, `source`, `sourceExtent`, `target`, `warnings`, `window`.
+Returns a structured object with: `channels`, `channelsDetail`, `clamped`, `detail`, `downmix`, `dryRun`, `duration`, `error`, `frames`, `layout`, `loudness`, `measuredSource`, `plan`, `remediation`, `sampleRate`, `silent`, `source`, `sourceExtent`, `sourceValidity`, `target`, `warnings`, `window`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -14358,6 +14358,9 @@ Returns a structured object with: `channels`, `channelsDetail`, `clamped`, `deta
         "type": "string"
       },
       "sourceExtent": {
+        "type": "object"
+      },
+      "sourceValidity": {
         "type": "object"
       },
       "target": {
@@ -15119,7 +15122,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `clamped`, `contentSpan`, `detail`, `dryRun`, `duration`, `error`, `frames`, `fullySilent`, `internalGaps`, `leadingSilenceSec`, `measuredSource`, `minSilenceSec`, `plan`, `remediation`, `sampleRate`, `silent`, `source`, `sourceExtent`, `target`, `thresholdDb`, `trailingSilenceSec`, `warnings`, `window`.
+Returns a structured object with: `clamped`, `contentSpan`, `detail`, `dryRun`, `duration`, `error`, `frames`, `fullySilent`, `internalGaps`, `leadingSilenceSec`, `measuredSource`, `minSilenceSec`, `plan`, `remediation`, `sampleRate`, `silent`, `source`, `sourceExtent`, `sourceValidity`, `target`, `thresholdDb`, `trailingSilenceSec`, `warnings`, `window`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -15223,6 +15226,9 @@ Returns a structured object with: `clamped`, `contentSpan`, `detail`, `dryRun`, 
         "type": "string"
       },
       "sourceExtent": {
+        "type": "object"
+      },
+      "sourceValidity": {
         "type": "object"
       },
       "target": {
@@ -16117,7 +16123,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `channels`, `channelsDetail`, `clamped`, `detail`, `dryRun`, `duration`, `error`, `frames`, `measuredSource`, `overview`, `plan`, `remediation`, `sampleRate`, `silent`, `source`, `sourceExtent`, `target`, `warnings`, `window`.
+Returns a structured object with: `channels`, `channelsDetail`, `clamped`, `detail`, `dryRun`, `duration`, `error`, `frames`, `measuredSource`, `overview`, `plan`, `remediation`, `sampleRate`, `silent`, `source`, `sourceExtent`, `sourceValidity`, `target`, `warnings`, `window`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -16217,6 +16223,9 @@ Returns a structured object with: `channels`, `channelsDetail`, `clamped`, `deta
         "type": "string"
       },
       "sourceExtent": {
+        "type": "object"
+      },
+      "sourceValidity": {
         "type": "object"
       },
       "target": {
@@ -16895,6 +16904,7 @@ Read-only, addressable snapshots of REAPER state (`resources/list`, `resources/r
 | `reaper://project/state` | Project state snapshot | static | `application/json` | Project name, length, tempo, play state, and a per-track summary (name, channels, volume dB, pan, mute, selection). |
 | `reaper://routing/graph` | Routing graph | static | `application/json` | The project's routing graph: nodes (tracks + master, with channel counts and folder/main-send flags) and edges (track-to-track sends and hardware outputs). The substrate the immersive layer builds beds and ambisonic pin maps on. |
 | `reaper://track/{index}/chunk` | Track .RPP state chunk | template | `text/plain` | The raw REAPER project (.RPP) state chunk for the track at {index} (0-based) — the exact text REAPER serializes to the project file, including FX, sends, and envelopes. |
+| `reaper://track/{trackIndex}/item/{itemIndex}/take/{takeIndex}/source` | Take source validity panel | template | `application/json` | Per-source readout for one take: the ReaScript-API rows (file name, type, channel count, sample rate, length) alongside the SDK vtable rows (PCM_source::IsAvailable, GetType, GetNumChannels, GetSampleRate, GetLength). IsAvailable is not exposed by the ReaScript API at any version, so this is the only route to a take's source-validity state — whether its media is online, offline, or missing. Read vtable.controlPassed before any vtable row: when it is false the SDK header and the running REAPER disagree about the vtable layout and no vtable row is believable. |
 
 ## Prompts
 
@@ -16953,4 +16963,4 @@ Scaffold an immersive Dolby Atmos session — a bed, N object tracks, a binaural
 
 ---
 
-_Reference generated 2026-08-11 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._
+_Reference generated 2026-08-14 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._

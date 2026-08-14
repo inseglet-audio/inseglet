@@ -3,16 +3,20 @@
 
 // resources_project.cpp — MCP resource providers for REAPER state.
 //
-// Three resources a client can list + read by URI (all read on the MAIN THREAD via the queue):
+// Four resources a client can list + read by URI (all read on the MAIN THREAD via the queue):
 //   reaper://project/state       (static, application/json)  — project + per-track summary snapshot
 //   reaper://routing/graph       (static, application/json)  — nodes (tracks/master) + send/hwout edges;
 //                                                               the substrate the immersive
 //                                                               layer reasons over (beds, pin maps)
 //   reaper://track/{index}/chunk (template, text/plain)      — a track's raw .RPP state chunk
+//   reaper://track/{t}/item/{i}/take/{k}/source
+//                                (template, application/json) — a take's source-validity panel,
+//                                                               API rows + SDK vtable rows
 //
 // Dual-path: native under REAPER_MCP_HAVE_SDK, representative payloads otherwise (so the resource
 // protocol is exercised by the host-side test without a running REAPER).
 
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -41,6 +45,44 @@ int trackIndexFromChunkUri(const std::string& uri) {
     } catch (...) {
         throw std::runtime_error("track chunk URI index is not a non-negative integer: " + uri);
     }
+}
+
+
+// --- the build-side source-validity readout -----------------------------------------------------
+// Parse reaper://track/{trackIndex}/item/{itemIndex}/take/{takeIndex}/source.
+struct SourceUriParts {
+    int track;
+    int item;
+    int take;
+};
+
+SourceUriParts sourceUriParts(const std::string& uri) {
+    static const std::string p0 = "reaper://track/", p1 = "/item/", p2 = "/take/", p3 = "/source";
+    const auto bad = [&uri]() -> SourceUriParts {
+        throw std::runtime_error("malformed take source URI: " + uri);
+    };
+    if (uri.compare(0, p0.size(), p0) != 0) return bad();
+    const size_t a = uri.find(p1, p0.size());
+    if (a == std::string::npos) return bad();
+    const size_t b = uri.find(p2, a + p1.size());
+    if (b == std::string::npos) return bad();
+    const size_t c = uri.find(p3, b + p2.size());
+    if (c == std::string::npos || c + p3.size() != uri.size()) return bad();
+
+    const auto num = [&uri](size_t from, size_t to) -> int {
+        const std::string s = uri.substr(from, to - from);
+        size_t consumed = 0;
+        int v = 0;
+        try {
+            v = std::stoi(s, &consumed);
+        } catch (...) {
+            throw std::runtime_error("take source URI index is not an integer: " + uri);
+        }
+        if (consumed != s.size() || v < 0)
+            throw std::runtime_error("take source URI index is not a non-negative integer: " + uri);
+        return v;
+    };
+    return SourceUriParts{num(p0.size(), a), num(a + p1.size(), b), num(b + p2.size(), c)};
 }
 
 #ifdef REAPER_MCP_HAVE_SDK
@@ -119,6 +161,68 @@ std::string trackChunkText(int idx) {
         throw std::runtime_error("GetTrackStateChunk failed for track " + std::to_string(idx));
     return std::string(buf.data());
 }
+
+// The panel: the API-layer rows and the VTABLE-layer rows over ONE
+// PCM_source*, read in a single pass.
+//
+// The vtable rows are the point. PCM_source::IsAvailable() is a pure virtual on every concrete
+// source and it is NOT in the ReaScript API surface at any version — which is why the accessor
+// the audio accessor, the saved .rpp and the live track chunk each measured a null on
+// source validity. They were not looking in the wrong place on the right surface; they were on a
+// surface where the datum does not exist.
+//
+// `vtable.controlPassed` is the instrument's OWN control, read from the same pointer as the datum:
+// if the SDK header and the running REAPER disagree about the vtable layout, every vtable figure
+// here is undefined behaviour. The control is what says so, instead of the figures quietly lying.
+Json takeSourceJson(int trackIdx, int itemIdx, int takeIdx) {
+    MediaItem* it = requireItem(trackIdx, itemIdx);
+    MediaItem_Take* tk = GetMediaItemTake(it, takeIdx);
+    if (!tk)
+        throw std::runtime_error("take index out of range on track " + std::to_string(trackIdx) +
+                                 " item " + std::to_string(itemIdx) + ": " +
+                                 std::to_string(takeIdx));
+
+    PCM_source* src = GetMediaItemTake_Source(tk);
+    Json out{{"trackIndex", trackIdx},
+             {"itemIndex", itemIdx},
+             {"takeIndex", takeIdx},
+             {"sourcePresent", src != nullptr}};
+    if (!src) return out;
+
+    // --- API layer -----------------------------------------------------------------------------
+    char fn[4096] = {0};
+    GetMediaSourceFileName(src, fn, (int)sizeof(fn));
+    char ty[128] = {0};
+    GetMediaSourceType(src, ty, (int)sizeof(ty));
+    bool lengthIsQN = false;
+    const double apiLen = GetMediaSourceLength(src, &lengthIsQN);
+    out["api"] = Json{{"fileName", fn},
+                      {"type", ty},
+                      {"numChannels", GetMediaSourceNumChannels(src)},
+                      {"sampleRate", GetMediaSourceSampleRate(src)},
+                      {"length", apiLen},
+                      {"lengthIsQN", lengthIsQN}};
+
+    // --- vtable layer, and its own control ------------------------------------------------------
+    const char* vtType = src->GetType();
+    const bool vtableOk = vtType != nullptr && vtType[0] != '\0' && strnlen(vtType, 65) < 64;
+    if (!vtableOk) {
+        out["vtable"] = Json{
+            {"controlPassed", false},
+            {"error", "vtable_control_failed"},
+            {"detail", "PCM_source::GetType() returned null or an implausible string; the SDK "
+                       "header and the running REAPER disagree about the vtable layout, so no "
+                       "vtable row is believable"}};
+        return out;
+    }
+    out["vtable"] = Json{{"controlPassed", true},
+                         {"type", vtType},
+                         {"isAvailable", src->IsAvailable()},
+                         {"numChannels", src->GetNumChannels()},
+                         {"sampleRate", src->GetSampleRate()},
+                         {"length", src->GetLength()}};
+    return out;
+}
 #endif  // REAPER_MCP_HAVE_SDK
 
 }  // namespace
@@ -170,6 +274,31 @@ void registerProjectResources(ResourceRegistry& reg) {
 #else
             return "<TRACK\n  NAME \"\"\n  # host/fallback: real .RPP chunk requires a running REAPER "
                    "(track " + std::to_string(idx) + ")\n>\n";
+#endif
+        }});
+
+    reg.add(Resource{
+        "reaper://track/{trackIndex}/item/{itemIndex}/take/{takeIndex}/source",
+        "Take source validity panel",
+        "Per-source readout for one take: the ReaScript-API rows (file name, type, channel count, "
+        "sample rate, length) alongside the SDK vtable rows (PCM_source::IsAvailable, GetType, "
+        "GetNumChannels, GetSampleRate, GetLength). IsAvailable is not exposed by the ReaScript API "
+        "at any version, so this is the only route to a take's source-validity state — whether its "
+        "media is online, offline, or missing. Read vtable.controlPassed before any vtable row: "
+        "when it is false the SDK header and the running REAPER disagree about the vtable layout "
+        "and no vtable row is believable.",
+        "application/json", /*isTemplate*/ true,
+        [](const std::string& uri) -> std::string {
+            const SourceUriParts p = sourceUriParts(uri);
+#ifdef REAPER_MCP_HAVE_SDK
+            return takeSourceJson(p.track, p.item, p.take).dump(2);
+#else
+            return Json{{"trackIndex", p.track},
+                        {"itemIndex", p.item},
+                        {"takeIndex", p.take},
+                        {"sourcePresent", false},
+                        {"note", "host/fallback: a real source panel requires a running REAPER"}}
+                .dump(2);
 #endif
         }});
 }

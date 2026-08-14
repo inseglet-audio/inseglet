@@ -281,6 +281,12 @@
 #define REAPERAPI_WANT_GetMediaItemTake_Source
 #define REAPERAPI_WANT_GetMediaSourceNumChannels
 #define REAPERAPI_WANT_GetMediaSourceSampleRate
+// The source-validity panel behind reaper://track/{t}/item/{i}/take/{k}/source.
+// These three are the API-LAYER half of the panel; the vtable half (PCM_source::IsAvailable and
+// friends) needs no import at all, which is exactly why no ReaScript-level instrument could see it.
+#define REAPERAPI_WANT_GetMediaSourceFileName
+#define REAPERAPI_WANT_GetMediaSourceType
+#define REAPERAPI_WANT_GetMediaSourceLength
 
 // --- Batch B2 breadth (groove/quantize + takes/comping + transport extras) ---
 // Groove/quantize (midi.*) reuse the already-imported MIDI CRUD (MIDI_Get/SetNote, PPQ<->QN,

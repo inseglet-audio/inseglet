@@ -347,13 +347,34 @@ inline AccessorRead readAccTarget(const AccTarget& t, const Json& a) {
                     : readTrackContent(t.track, rate, start, dur);
 }
 
+// The RAW source-validity rows behind every accessor read (F-184.4). `available` is null -- never
+// true -- when this path queried no source, because a detector that cannot fail is not a detector.
+inline Json accSourceBlock(const AccessorRead& r) {
+    Json s{{"queried", r.sourcesQueried},
+           {"unavailable", r.sourcesUnavailable},
+           {"available", r.sourcesQueried > 0 ? Json(r.sourcesUnavailable == 0) : Json(nullptr)},
+           {"sampleRate", r.sourceRawValid ? Json(r.sourceSampleRate) : Json(nullptr)},
+           {"channels", r.sourceRawValid ? Json(r.sourceChannels) : Json(nullptr)},
+           {"length", r.sourceRawValid ? Json(r2(r.sourceLengthSec)) : Json(nullptr)},
+           {"lengthIsQN", r.sourceRawValid ? Json(r.sourceLengthIsQN) : Json(nullptr)},
+           {"defaulted", r.defaulted}};
+    if (r.sourcesUnavailable > 0)
+        s["note"] = "REAPER reports " + std::to_string(r.sourcesUnavailable) + " of " +
+                    std::to_string(r.sourcesQueried) +
+                    " source(s) on this target as UNAVAILABLE (offline, missing, or de-validated "
+                    "by a deactivation edge). The levels above still describe what the accessor "
+                    "returned; action.run {command: 40101} revalidates the project's sources.";
+    return s;
+}
+
 // Common window/echo fields shared by the accessor tools.
 inline Json accWindowBlock(const AccessorRead& r) {
     return Json{{"sampleRate", (int)r.buf.sampleRate}, {"channels", r.buf.channels},
                 {"frames", (double)r.buf.frames}, {"duration", r2(r.readDur)},
                 {"window", Json{{"start", r2(r.readStart)}, {"end", r2(r.readStart + r.readDur)}}},
                 {"sourceExtent", Json{{"start", r2(r.accStart)}, {"end", r2(r.accEnd)}}},
-                {"clamped", r.clamped}, {"silent", r.silent}};
+                {"clamped", r.clamped}, {"silent", r.silent},
+                {"sourceValidity", accSourceBlock(r)}};
 }
 #endif
 
@@ -2338,6 +2359,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "frames":{"type":"number"},"duration":{"type":"number"},
             "window":{"type":"object"},"sourceExtent":{"type":"object"},
             "clamped":{"type":"boolean"},"silent":{"type":"boolean"},
+            "sourceValidity":{"type":"object"},
             "channelsDetail":{"type":"array"},"overview":{"type":"object"},
             "measuredSource":{"type":"string"},"plan":{"type":"string"},"dryRun":{"type":"boolean"},
             "warnings":{"type":"array"},"error":{"type":"string"},"detail":{"type":"string"},
@@ -2430,6 +2452,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "frames":{"type":"number"},"duration":{"type":"number"},
             "window":{"type":"object"},"sourceExtent":{"type":"object"},
             "clamped":{"type":"boolean"},"silent":{"type":"boolean"},
+            "sourceValidity":{"type":"object"},
             "loudness":{"type":"object"},"channelsDetail":{"type":"array"},"downmix":{"type":"object"},
             "measuredSource":{"type":"string"},"plan":{"type":"string"},"dryRun":{"type":"boolean"},
             "warnings":{"type":"array"},"error":{"type":"string"},"detail":{"type":"string"},
@@ -2530,6 +2553,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "sampleRate":{"type":"integer"},"frames":{"type":"number"},"duration":{"type":"number"},
             "window":{"type":"object"},"sourceExtent":{"type":"object"},
             "clamped":{"type":"boolean"},"silent":{"type":"boolean"},
+            "sourceValidity":{"type":"object"},
             "thresholdDb":{"type":"number"},"minSilenceSec":{"type":"number"},
             "fullySilent":{"type":"boolean"},
             "leadingSilenceSec":{"type":"number"},"trailingSilenceSec":{"type":"number"},

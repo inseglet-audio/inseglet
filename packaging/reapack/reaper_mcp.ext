@@ -1,26 +1,43 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.11.0
+@version 1.12.0
 @author James Livingston
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  Guard release: the ADM, DAMF and Loom export tools can now FAIL TO MEASURE. All three
-  used to author a complete deliverable from a render in which every sample of every
-  channel was exactly zero, stamping loudness claims that were just the arithmetic image
-  of "no samples" (-120 dB RMS, a -70 LUFS floor, 0.0 active fraction). The old
-  render_empty guard only caught a render of zero LENGTH.
-  *** BREAKING: authoring a deliberately silent master now needs allowSilent:true. ***
-  Passing allowSilent reproduces the previous bytes EXACTLY - the escape hatch is the old
-  behaviour, verified byte-identical on three fixtures.
-  Surface is unchanged at 190 tools / 3 resources / 5 prompts, but THREE TOOLS GAIN ONE
-  PARAMETER - a schema change the tool-count triple cannot see.
-  The test is exact zero on every sample of every channel, never a threshold: a real 7.1.4
-  deliverable with one channel fed has ELEVEN of twelve channels on the same floor triple,
-  so a per-channel rule would reject real work. One 1e-9 sample clears the guard. Whether a
-  quiet master is too quiet is not this tool's judgement to make, and the -70 floor is
-  correct and stays.
-  It was never one site: export_damf authored its triad from the same unmeasured render,
-  and export_loom_manifest emitted the same floor triple through intentFillLevels /
-  intentBedLufs plus a whole-bed expectLufs of -70. Measured pre-fix on all three.
-  docs/REFERENCE.md is regenerated: allowSilent had existed in three input schemas and in
-  no user-facing document, because the surface gate counts tools, not parameters.
+  Instrument release: Inseglet can now tell you whether a take's media is actually there.
+
+  reaper://track/{trackIndex}/item/{itemIndex}/take/{takeIndex}/source is a new resource --
+  the fourth -- carrying a per-source readout for one take: the ReaScript-API rows (file name,
+  type, channel count, sample rate, length) alongside the SDK vtable rows, including
+  PCM_source::IsAvailable(). IsAvailable is not in the ReaScript API at any version, so this is
+  the only route to a take's source-validity state: online, offline, or missing. Read
+  vtable.controlPassed before any vtable row -- when it is false, the SDK header and the running
+  REAPER disagree about the vtable layout and no vtable figure is believable. The panel carries
+  that control itself rather than letting the numbers quietly lie.
+
+  The three accessor tools -- analysis.accessor_meter, analysis.accessor_levels and
+  analysis.accessor_gaps -- now report source validity instead of papering over it. Each read
+  gains a `sourceValidity` block: how many sources it interrogated, how many reported unavailable, the
+  RAW sample rate / channel count / length the source gave, and `defaulted`, which NAMES every
+  field a fallback stood in for. On a read that did not interrogate exactly one
+  source -- every track read -- those three are NULL rather than 0, because a zero there would be
+  the very substitution this release removes. When a source is unavailable the block also carries the remedy.
+
+  *** This is ADDITIVE. No tool changes what it returns, refuses anything it used to accept, or
+  reads different samples. ***
+
+  The fix behind it is ours. The accessor substituted a plausible sample rate for a source that
+  reported zero, and a channel count of 2 for one that reported less than one -- exactly the two
+  fields REAPER zeroes when it cannot open a source. So the read looked identical whether the
+  media was there or not, and three separate investigations concluded the datum did not exist.
+  It did. A defensive default is a detector-killer: code that swaps a plausible value in for a
+  missing one destroys the evidence that it was missing.
+
+  The predicate now lives in its own REAPER-free header so its whole truth table is testable, and
+  unit.source_probe carries two controls that must FIRE: the pre-fix defaults reproducing the
+  identical-read null, and the predicate stripped of its quarter-note guard reporting an ordinary
+  MIDI take as a broken source. The second is the expensive direction -- a detector that fires on
+  healthy content is a detector its users switch off.
+
+  Surface 190 tools / 4 resources / 5 prompts (was 190 / 3 / 5). ctest 27 -> 28.
+  docs/REFERENCE.md is regenerated: it had not been regenerated when the resource landed.

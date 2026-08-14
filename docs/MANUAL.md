@@ -1,6 +1,6 @@
 % Inseglet — User Manual
 % A native REAPER extension exposing a Model Context Protocol interface
-% Version 1.11.0 · 2026
+% Version 1.12.0 · 2026
 
 ---
 
@@ -13,7 +13,7 @@ This manual covers installation, connecting a client, the concepts you need, a c
 server can do, worked examples, and troubleshooting. For the exhaustive, machine-generated schema of
 every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from the live registry).
 
-> This document is written for v1.11.0. Inseglet currently targets **macOS first**;
+> This document is written for v1.12.0. Inseglet currently targets **macOS first**;
 > Windows and Linux build in CI and follow once load-verified in a real REAPER.
 >
 > ⚠️ **Breaking in v1.11.0: `spatial.export_adm`, `spatial.export_damf` and

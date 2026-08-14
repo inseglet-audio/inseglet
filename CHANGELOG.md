@@ -6,6 +6,54 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.12.0] — 2026-08-15
+
+Inseglet can now tell you whether a take's media is actually **there**. The surface grows to
+**190 tools / 4 resources / 5 prompts**; the release is **purely additive** — no tool changes
+what it returns, refuses anything it previously accepted, or reads different samples.
+
+### Added
+
+- **`reaper://track/{trackIndex}/item/{itemIndex}/take/{takeIndex}/source` — a source-validity
+  panel.** A per-source readout for one take: the ReaScript-API rows (file name, type, channel
+  count, sample rate, length) alongside the SDK vtable rows, including
+  **`PCM_source::IsAvailable()`**. `IsAvailable` is not exposed by the ReaScript API at any
+  version, so this is the only route to a take's source-validity state — online, offline, or
+  missing.
+  ⚠️ **Read `vtable.controlPassed` before trusting any vtable row.** When it is false, the SDK
+  header and the running REAPER disagree about the vtable layout and no vtable figure is
+  believable. The panel carries that control itself rather than letting the numbers quietly lie.
+- **A `sourceValidity` block on every accessor read** — `analysis.accessor_meter`,
+  `analysis.accessor_levels` and `analysis.accessor_gaps`. It reports how many sources the read
+  interrogated, how many reported unavailable, the **raw** sample rate / channel count / length
+  the source gave, and **`defaulted`**, which names every field a fallback stood in for. When a
+  source is unavailable the block carries the remedy: `action.run {command: 40101}` revalidates
+  the project's sources.
+  `available` is **null**, never `true`, when a read queried no source at all, and the three
+  single-source raw figures are **null** rather than `0` on any read that did not interrogate
+  exactly one source — a zero there would be indistinguishable from a source reporting zero.
+
+### Fixed
+
+- **The accessor reported an identical read whether a take's media was there or not.**
+  `src/audio_accessor.h` substituted a plausible sample rate for a source that reported `0`, and
+  a channel count of `2` for one that reported less than `1` — exactly the two fields REAPER
+  zeroes when it cannot open a source. The evidence that anything was missing was destroyed
+  before it could be read. The reads still fall back, so behaviour is unchanged, but every
+  substitution now names itself and the raw readings travel beside it.
+- **The track-read path interrogated no source at all**, so removing the fallbacks alone would
+  not have helped it. It now asks every take of every item on the track.
+- **`docs/REFERENCE.md` regenerated** — it still advertised three resources.
+
+### Testing
+
+- **New `unit.source_probe`** (unit suite 27 → 28). The predicate lives in its own REAPER-free
+  header so its whole truth table runs on a host build, and it carries two controls that must
+  **fire**: the pre-fix defaults reproducing the identical-read result, and the predicate
+  stripped of its quarter-note guard reporting an ordinary **MIDI take** as a broken source — a
+  source measured in quarter notes legitimately has no sample rate, and a detector that fires on
+  healthy content is a detector its users switch off.
+
 ## [1.11.0] — 2026-08-12
 
 The export tools can now **fail to measure**. The surface is unchanged at **190 tools /

@@ -26,6 +26,7 @@
 
 #include "tools/tool_helpers.h"   // reaper_api.h (SWELL de-fang) + arg helpers + kCur
 #include "ambisonic_meter.h"      // meter::AudioBuffer
+#include "source_probe.h"         // SourceProbe -- SDK-free, so its truth table is unit-testable
 
 #include <algorithm>
 #include <cmath>
@@ -48,6 +49,25 @@ struct AccessorRead {
     bool clamped = false;         // requested window was clipped to the extent (or the frame cap)
     bool silent = false;          // accessor reported no audio anywhere in the window
     bool stateChanged = false;    // accessor state was stale and revalidated before reading
+
+    // ---- RAW source readings, taken BEFORE any fallback can stand in for them ------------------
+    // F-184.4 / directive 115. REAPER reports a source it cannot currently open as sampleRate 0,
+    // length 0.0 and numChannels < 1 -- and the two fallbacks in this header used to substitute a
+    // plausible value for exactly those fields, so three investigations measured a null on source validity
+    // that our own code had manufactured. The READ BEHAVIOUR IS UNCHANGED: these fields report what
+    // the source actually said, and `defaulted` names every field a fallback stood in for.
+    // `sourcesQueried == 0` means this path asked no PCM_source anything -- it never means "fine".
+    int sourcesQueried = 0;       // how many PCM_source* this read interrogated
+    int sourcesUnavailable = 0;   // of those, how many reported an unusable rate/width/length
+    bool sourceRawValid = false;  // the three RAW fields below describe ONE source and are real;
+                                  // false => this read did not interrogate exactly one source and
+                                  // they carry nothing. They are emitted as NULL, never as 0 --
+                                  // a zero here would be the very substitution this release kills.
+    int sourceSampleRate = 0;     // RAW GetMediaSourceSampleRate    (single-source reads only)
+    int sourceChannels = 0;       // RAW GetMediaSourceNumChannels   (single-source reads only)
+    double sourceLengthSec = 0.0; // RAW GetMediaSourceLength        (single-source reads only)
+    bool sourceLengthIsQN = false;// the length above is in QUARTER NOTES, not seconds (MIDI)
+    std::vector<std::string> defaulted;  // fields a fallback substituted, e.g. {"sampleRate"}
 };
 
 // Cap on frames read in one call so a huge window can't stall the main-thread pump (~60 s at 48 kHz).
@@ -117,6 +137,17 @@ inline void readAccessorWindow(AudioAccessor* acc, int rate, int chans,
     out.ok = true;
 }
 
+inline SourceProbe probeTakeSource(MediaItem_Take* tk) {
+    SourceProbe p;
+    PCM_source* s = tk ? GetMediaItemTake_Source(tk) : nullptr;
+    if (!s) return p;
+    p.present = true;
+    p.channels = GetMediaSourceNumChannels(s);
+    p.sampleRate = GetMediaSourceSampleRate(s);
+    p.lengthSec = GetMediaSourceLength(s, &p.lengthIsQN);
+    return p;
+}
+
 // Read a TRACK's item/take content (pre track-FX/volume/pan). rate<=0 => project rate.
 inline AccessorRead readTrackContent(int trackIdx, int rate, double startSec, double durSec) {
     AccessorRead r;
@@ -126,8 +157,22 @@ inline AccessorRead readTrackContent(int trackIdx, int rate, double startSec, do
         r.remediation = "pass a valid track index or name";
         return r;
     }
+    // The track path asks no source anything on its own -- so ask, or the null is ours again.
+    const int nItems = CountTrackMediaItems(t);
+    for (int i = 0; i < nItems; ++i) {
+        MediaItem* mi = GetTrackMediaItem(t, i);
+        if (!mi) continue;
+        const int nTakes = CountTakes(mi);
+        for (int k = 0; k < nTakes; ++k) {
+            const SourceProbe p = probeTakeSource(GetMediaItemTake(mi, k));
+            if (!p.present) continue;
+            ++r.sourcesQueried;
+            if (p.unavailable()) ++r.sourcesUnavailable;
+        }
+    }
+
     int chans = (int)GetMediaTrackInfo_Value(t, "I_NCHAN");
-    if (chans < 1) chans = 2;
+    if (chans < 1) { chans = 2; r.defaulted.push_back("channels"); }
     AudioAccessor* acc = CreateTrackAudioAccessor(t);
     if (!acc) {
         r.error = "accessor_failed";
@@ -148,11 +193,26 @@ inline AccessorRead readTakeContent(MediaItem_Take* tk, int rate, double startSe
         r.remediation = "pass a valid itemIndex (and optional takeIndex)";
         return r;
     }
-    PCM_source* src = GetMediaItemTake_Source(tk);
-    int chans = src ? GetMediaSourceNumChannels(src) : 0;
-    if (chans < 1) chans = 2;
-    const int srcRate = src ? GetMediaSourceSampleRate(src) : 0;
-    const int useRate = rate > 0 ? rate : (srcRate > 0 ? srcRate : projectSampleRateOr48k());
+    const SourceProbe p = probeTakeSource(tk);
+    r.sourcesQueried = p.present ? 1 : 0;
+    r.sourcesUnavailable = p.unavailable() ? 1 : 0;
+    r.sourceChannels = p.channels;
+    r.sourceSampleRate = p.sampleRate;
+    r.sourceLengthSec = p.lengthSec;
+    r.sourceLengthIsQN = p.lengthIsQN;
+    r.sourceRawValid = p.present;
+
+    int chans = p.channels;
+    if (chans < 1) { chans = 2; r.defaulted.push_back("channels"); }
+    int useRate = rate;
+    if (useRate <= 0) {
+        if (p.sampleRate > 0) {
+            useRate = p.sampleRate;
+        } else {
+            useRate = projectSampleRateOr48k();
+            r.defaulted.push_back("sampleRate");   // <- the line that null was hiding behind
+        }
+    }
     AudioAccessor* acc = CreateTakeAudioAccessor(tk);
     if (!acc) {
         r.error = "accessor_failed";

@@ -137,6 +137,7 @@ add_test(NAME unit.damf COMMAND reaper_mcp_damf_test)
 add_executable(reaper_mcp_bed_weights_test unit/test_bed_weights.cpp)
 target_include_directories(reaper_mcp_bed_weights_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME unit.bed_weights COMMAND reaper_mcp_bed_weights_test)
+
 # --- Unit: Batch P2 Inseglet -> iamf-loom bridge core (loom_manifest.h; header-only, no REAPER) ---
 # Pure SDK-free logic: the Inseglet<->Loom channel-order mapping pin, the identity-tone verification
 # of the Loom-order WAV writer (B4 method, independent in-test RIFF reader + Goertzel), the golden
@@ -147,7 +148,6 @@ target_include_directories(reaper_mcp_loom_manifest_test PRIVATE
   ${CMAKE_SOURCE_DIR}/src ${REAPER_MCP_DEP_INCLUDE_DIRS})
 target_link_libraries(reaper_mcp_loom_manifest_test PRIVATE Threads::Threads)
 add_test(NAME unit.loom_manifest COMMAND reaper_mcp_loom_manifest_test)
-
 
 # --- Unit: Batch L1 object send-layout orchestration core (send_layout.h; header-only, no REAPER) ---
 # Pure SDK-free logic: the bed-first renderer input roster, the send I_SRCCHAN/I_DSTCHAN encode/decode
@@ -229,6 +229,16 @@ target_include_directories(reaper_mcp_adm_dolby_meta_test PRIVATE
   ${CMAKE_SOURCE_DIR}/src ${REAPER_MCP_DEP_INCLUDE_DIRS})
 target_link_libraries(reaper_mcp_adm_dolby_meta_test PRIVATE Threads::Threads)
 add_test(NAME unit.adm_dolby_meta COMMAND reaper_mcp_adm_dolby_meta_test)
+
+# --- Unit: the source-validity predicate (source_probe.h; header-only, no REAPER) --------------
+# Pins F-184.4's fix. Three investigations measured a null on source validity that this tree's own
+# defensive fallbacks had manufactured (directive 115), so this suite carries TWO controls that
+# must FIRE: the pre-fix defaults reproducing the identical-envelope null, and the predicate
+# stripped of its `!lengthIsQN` term reporting an ordinary MIDI take as a broken source. The
+# second is the expensive direction — a detector that fires on healthy content gets switched off.
+add_executable(reaper_mcp_source_probe_test unit/test_source_probe.cpp)
+target_include_directories(reaper_mcp_source_probe_test PRIVATE ${CMAKE_SOURCE_DIR}/src)
+add_test(NAME unit.source_probe COMMAND reaper_mcp_source_probe_test)
 
 # --- Integration tests (require a REAPER install; opt-in) ---
 # Run: ctest -R integration  (needs REAPER_BIN env var pointing at the REAPER executable)

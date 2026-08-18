@@ -45,6 +45,7 @@
 #include "../ambisonic_meter.h"  // metering DSP (WAV read + per-channel + ambisonic field)
 #include "../bed_weights.h"     // SMPTE bed labels + BS.1770-4 channel weights (F33)
 #include "../audio_accessor.h"   // render-free direct sample reads (accessor -> meter::AudioBuffer)
+#include "../intent_sidecar.h"   // classifyRenderSilence -- the SAME detector the export sites use
 #include "../identity_tones.h"   // B4: the corpus tone plan + Goertzel routing detector
 #include "../adm_bwf.h"          // ADM (BS.2076) parse + summarize for analysis.adm_inspect
 #include "../adm_profile.h"      // Dolby Atmos Master ADM Profile conformance validator
@@ -768,12 +769,13 @@ void registerAnalysisTools(ToolRegistry& reg) {
         "reading) using the measure-don't-limit config, so a headroomed master is measured exactly. "
         "Bound the range with boundsFlag (0 = custom startPos/endPos, 1 = ENTIRE PROJECT — the default, "
         "2 = time selection) to fit the call window and avoid a long synchronous render. Complements analysis.check_deliverable (spec pass/fail) and "
-        "analysis.spatial_field (ambisonic direction).",
+        "analysis.spatial_field (ambisonic direction). REFUSES to report an all-zero render as measured silence when a render-free accessor read of the same track disagrees (render_silent_unconfirmed) -- the signature alone cannot separate genuine silence from a render that never happened; pass allowSilent:true to report it anyway with both readings attached.",
         jparse(R"({"type":"object","properties":{
             "target":{"type":["integer","string"]},
             "boundsFlag":{"type":"integer","minimum":0,"maximum":7,"default":1},
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
+            "allowSilent":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
@@ -781,6 +783,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
             "downmix":{"type":"object"},"measuredSource":{"type":"string"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
+            "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "plan":{"type":"string"},"dryRun":{"type":"boolean"},
             "error":{"type":"string"},"detail":{"type":"string"},"remediation":{"type":"string"},
             "warnings":{"type":"array"}}})"),
@@ -832,6 +835,183 @@ void registerAnalysisTools(ToolRegistry& reg) {
             Json warnings = Json::array();
             const int nc = tr.buf.channels;
 
+            // ---- F-160.5 / DIRECTIVE 70, ONE CALL SITE OVER ----------------------------------
+            // The three export sites already refuse to AUTHOR a silence they cannot vouch for.
+            // analysis.meter REPORTS one -- and a report is a claim too.  A live gate met twelve
+            // channels of confident silence, ok:true, no warning, while the accessor read the same
+            // track fine.  It was then MEASURED that the signature ALONE cannot separate the two
+            // cases: an empty-but-alive 4 s window returns byte-for-byte the dead image, and
+            // elapsed time does not discriminate either.  So the signature is necessary and it is
+            // nowhere near sufficient.
+            // The detector is FREE here -- the samples are already in tr.buf -- and it is INERT on
+            // any render that carries content: no accessor call, no extra work, no cost.
+            const intent::RenderSilence sil = intent::classifyRenderSilence(
+                tr.buf.samples.data(), tr.buf.frames, tr.buf.channels);
+            Json renderSilence = Json{{"allZero", sil.allZero}, {"channels", sil.channels},
+                                      {"zeroChannels", sil.zeroChannels},
+                                      {"frames", (double)tr.buf.frames}};
+            Json crossRead = Json{{"available", false},
+                                  {"reason", "not attempted — the render carries content, so there "
+                                             "is nothing to disambiguate"},
+                                  {"path", "none"}};
+            if (sil.allZero) {
+                const bool allowSilent = optBool(a, "allowSilent", false);
+                bool contradicted = false, crossAvailable = false;
+                // ⛔ WHICH BRANCH SET `crossRead` IS A FACT THE WARNING NEEDS, AND A BARE BOOL
+                // CANNOT CARRY IT (F-195.5).  `crossAvailable == false` was true for
+                // TWO different states -- a target with no accessor sibling, and a target whose
+                // accessor read FAILED -- so the master's reason was printed for an accessor
+                // failure.  Directive 111: two states no instrument distinguishes are one state.
+                // Directive 124(b): report WHICH case fired.
+                enum CrossPathKind { CROSS_NOT_ATTEMPTED, CROSS_OK,
+                                     CROSS_ACCESSOR_FAILED, CROSS_NO_SIBLING };
+                CrossPathKind crossPath = CROSS_NOT_ATTEMPTED;
+                // ---- THE WINDOW MUST MATCH, OR THE COMPARISON IS NOT ONE (F-195.4).
+                // The render is bounded by boundsFlag; the accessor read is bounded by its own
+                // arguments, and durSec <= 0 means THE WHOLE EXTENT.  The first live call of this
+                // code compared a 4 s render against a 102 s accessor read and reported a
+                // two-path DISAGREEMENT IT HAD MANUFACTURED.  A refusal is only earned when both
+                // paths were asked the SAME question, so the window is derived here and a
+                // MISMATCH DOWNGRADES THE REFUSAL TO A REPORT -- it never silently compares.
+                const bool haveCustomWindow =
+                    (boundsFlag == 0 && a.contains("startPos") && a["startPos"].is_number() &&
+                     a.contains("endPos") && a["endPos"].is_number() &&
+                     a["endPos"].get<double>() > a["startPos"].get<double>());
+                const double winStart = haveCustomWindow ? a["startPos"].get<double>() : 0.0;
+                const double winDur = haveCustomWindow
+                    ? a["endPos"].get<double>() - a["startPos"].get<double>() : 0.0;
+                if (targetIsTrack) {
+                    // ⚠️ THE INDEPENDENT READ PATH (measured in BOTH directions: Δ = 0.0
+                    // against the alive regime on a provably dead render).  It reads
+                    // without rendering and survives a dead render path.
+                    // ⛔ BUT IT READS ITEM/TAKE CONTENT **PRE** TRACK-FX / VOLUME / PAN, so content
+                    // here does NOT prove the render is dead: a MUTED or UNROUTED track reads
+                    // content on this path and renders to LEGITIMATE silence.  What this
+                    // establishes is DISAGREEMENT BETWEEN TWO READ PATHS.  It does not diagnose,
+                    // and the payload below must not pretend that it does.
+                    const AccessorRead ar =
+                        readTrackContent(targetTrack, projectSampleRateOr48k(), winStart, winDur);
+                    if (!ar.ok) {
+                        crossPath = CROSS_ACCESSOR_FAILED;
+                        crossRead = Json{{"available", false},
+                                         {"pathKind", "accessor_failed"},
+                                         {"reason", "the accessor read failed: " + ar.error},
+                                         {"path", "accessor:track " + std::to_string(targetTrack)}};
+                    } else {
+                        const intent::RenderSilence acc = intent::classifyRenderSilence(
+                            ar.buf.samples.data(), ar.buf.frames, ar.buf.channels);
+                        // ⛔ A DISAGREEMENT ACROSS DIFFERENT WINDOWS IS NOT A DISAGREEMENT.
+                        contradicted = !acc.allZero && haveCustomWindow;
+                        crossAvailable = true;
+                        crossPath = CROSS_OK;
+                        crossRead = Json{
+                            {"available", true},
+                            {"pathKind", "accessor_read"},
+                            {"path", "accessor:track " + std::to_string(targetTrack)},
+                            {"allZero", acc.allZero}, {"channels", acc.channels},
+                            {"zeroChannels", acc.zeroChannels},
+                            {"frames", (double)ar.buf.frames},
+                            {"windowMatched", haveCustomWindow},
+                            {"windowStartSec", winStart},
+                            {"windowDurSec", haveCustomWindow ? Json(winDur) : Json(nullptr)},
+                            {"windowNote", haveCustomWindow
+                                 ? "the accessor read the SAME bounded window as the render"
+                                 : "the render was bounded by boundsFlag (not a custom "
+                                   "startPos/endPos) and the accessor read its WHOLE extent — the "
+                                   "two readings are over DIFFERENT domains, so a difference "
+                                   "between them is not evidence and no refusal is issued"},
+                            {"accessorSilentFlag", ar.silent}, {"clamped", ar.clamped},
+                            {"stateChanged", ar.stateChanged},
+                            {"sourcesQueried", ar.sourcesQueried},
+                            {"sourcesUnavailable", ar.sourcesUnavailable},
+                            {"sourceRawValid", ar.sourceRawValid},
+                            {"sourceSampleRate",
+                             ar.sourceRawValid ? Json(ar.sourceSampleRate) : Json(nullptr)},
+                            {"sourceChannels",
+                             ar.sourceRawValid ? Json(ar.sourceChannels) : Json(nullptr)},
+                            {"sourceLengthSec",
+                             ar.sourceRawValid ? Json(ar.sourceLengthSec) : Json(nullptr)},
+                            {"defaulted", ar.defaulted}};
+                    }
+                } else {
+                    // ⛔ THE MASTER TARGET HAS NO INDEPENDENT READ PATH, AND THAT IS STRUCTURAL.
+                    // The audio accessor is per-TRACK; resolveAccessorTarget() refuses anything
+                    // else.  The master track's own ITEMS are not the master BUS, so reading them
+                    // would report silence BY CONSTRUCTION and CONFIRM a dead render.  A
+                    // cross-read that cannot fail is a rubber stamp with a second number on it.
+                    // So none is manufactured, and the absence is a NAMED FIELD rather than prose
+                    // (F-191.1: the next reader is a program).
+                    crossPath = CROSS_NO_SIBLING;
+                    crossRead = Json{
+                        {"available", false},
+                        {"pathKind", "no_sibling_path"},
+                        {"reason", "the audio accessor is a per-TRACK path (it reads item/take "
+                                   "content); the master target has no accessor sibling, so no "
+                                   "independent read of this target exists. The master track's own "
+                                   "items are not the master bus — reading them would confirm "
+                                   "silence by construction, so no second reading is manufactured"},
+                        {"path", "none"}};
+                }
+
+                if (contradicted && !allowSilent)
+                    return makeError(
+                        "render_silent_unconfirmed",
+                        "every one of the " + std::to_string(sil.channels) +
+                            " rendered channels is digital silence, but a render-free accessor read "
+                            "of the same track finds content — the two read paths disagree, and this "
+                            "tool cannot tell a DEAD RENDER from a MUTED or UNROUTED source that "
+                            "renders to legitimate silence, so it will not assert either",
+                        "read the track without rendering via analysis.accessor_meter, confirm the "
+                        "track is unmuted and routed to the master, and bound the render with "
+                        "boundsFlag=0 + startPos/endPos; pass allowSilent:true to report the "
+                        "silence anyway with both readings attached");
+
+                if (contradicted)
+                    warnings.push_back(
+                        "allowSilent: the render is digital silence on all " +
+                        std::to_string(sil.channels) +
+                        " channels while a render-free accessor read of the same track finds "
+                        "content; BOTH readings are reported and NEITHER is adjudicated.");
+                else if (crossAvailable && !haveCustomWindow)
+                    warnings.push_back(
+                        "the render is digital silence on all " + std::to_string(sil.channels) +
+                        " channels; an accessor read was taken but over the track's WHOLE extent, "
+                        "not the render's window (see crossRead.windowNote), so the two readings "
+                        "are NOT comparable and NOTHING is concluded from their difference. Bound "
+                        "the call with boundsFlag=0 + startPos/endPos to make them comparable.");
+                else if (crossAvailable)
+                    warnings.push_back(
+                        "the render is digital silence on all " + std::to_string(sil.channels) +
+                        " channels, and an independent render-free accessor read of the SAME "
+                        "bounded window AGREES — consistent with genuine silence, which is not the "
+                        "same as proof of it.");
+                // ⛔ THE TAIL SELECTS ON WHICH BRANCH SET `crossRead`, NOT ON A BARE BOOL.
+                // An accessor path that EXISTS AND FAILED is not an absent accessor path, and
+                // saying so is the part a human acts on (F-195.5).
+                else if (crossPath == CROSS_ACCESSOR_FAILED)
+                    warnings.push_back(
+                        "the render is digital silence on all " + std::to_string(sil.channels) +
+                        " channels; an independent render-free read path EXISTS for this target "
+                        "and it FAILED (see crossRead.reason) — that is NOT the same as having no "
+                        "second read path, and nothing is concluded from a read that did not "
+                        "happen. Fix the read (commonly: bound the call inside the source extent) "
+                        "and call again to get a comparison at all.");
+                else if (crossPath == CROSS_NO_SIBLING)
+                    warnings.push_back(
+                        "the render is digital silence on all " + std::to_string(sil.channels) +
+                        " channels and NO independent read path exists for this target (see "
+                        "crossRead.reason) — the signature alone cannot separate genuine silence "
+                        "from a render that never happened, so nothing is claimed here.");
+                else
+                    // FAIL CLOSED: an unaccounted cross-read state names itself rather than
+                    // borrowing the nearest plausible reason (directive 115's shape in prose).
+                    warnings.push_back(
+                        "the render is digital silence on all " + std::to_string(sil.channels) +
+                        " channels and the cross-read state is UNACCOUNTED FOR (see "
+                        "crossRead.pathKind) — no reason is asserted, because this tool does not "
+                        "know which read path was taken.");
+            }
+
             // Program loudness from RENDER_STATS.
             Json program = Json::object();
             const Json& f0 = tr.statsFile;
@@ -872,6 +1052,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"boundsFlag", boundsFlag}, {"program", program},
                         {"channelsDetail", chDetail}, {"downmix", downmix},
                         {"measuredSource", "render+samples"},
+                        {"renderSilence", renderSilence}, {"crossRead", crossRead},
                         {"rawStats", f0.contains("stats") ? f0["stats"] : Json::object()},
                         {"warnings", warnings}};
 #else

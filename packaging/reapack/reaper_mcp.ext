@@ -1,43 +1,36 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.12.0
+@version 1.13.0
 @author James Livingston
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  Instrument release: Inseglet can now tell you whether a take's media is actually there.
+  Refusal release: `analysis.meter` will no longer REPORT a digital silence that two
+  independent read paths disagree about over the same bounded window.
 
-  reaper://track/{trackIndex}/item/{itemIndex}/take/{takeIndex}/source is a new resource --
-  the fourth -- carrying a per-source readout for one take: the ReaScript-API rows (file name,
-  type, channel count, sample rate, length) alongside the SDK vtable rows, including
-  PCM_source::IsAvailable(). IsAvailable is not in the ReaScript API at any version, so this is
-  the only route to a take's source-validity state: online, offline, or missing. Read
-  vtable.controlPassed before any vtable row -- when it is false, the SDK header and the running
-  REAPER disagree about the vtable layout and no vtable figure is believable. The panel carries
-  that control itself rather than letting the numbers quietly lie.
+  `analysis.meter` renders to measure. When that render comes back all-zero the tool used to
+  report the silence as a measurement, and a dead render path is byte-for-byte
+  indistinguishable from a genuinely silent one -- the same `-144.0` on every channel, the
+  same `rawStats` carrying `LENGTH` alone, no `error` key, and elapsed times that do not
+  discriminate either. The tool now cross-reads the same window through
+  `analysis.accessor_meter`, which reads the track without rendering, and when the two paths
+  disagree it refuses the CLAIM rather than the call: `render_silent_unconfirmed`. Pass
+  `allowSilent` and it reports anyway, attaching BOTH readings and `windowMatched` so the
+  disagreement is in the payload rather than in a footnote.
 
-  The three accessor tools -- analysis.accessor_meter, analysis.accessor_levels and
-  analysis.accessor_gaps -- now report source validity instead of papering over it. Each read
-  gains a `sourceValidity` block: how many sources it interrogated, how many reported unavailable, the
-  RAW sample rate / channel count / length the source gave, and `defaulted`, which NAMES every
-  field a fallback stood in for. On a read that did not interrogate exactly one
-  source -- every track read -- those three are NULL rather than 0, because a zero there would be
-  the very substitution this release removes. When a source is unavailable the block also carries the remedy.
+  Two things it deliberately does NOT do. It does not refuse when the two reads covered
+  DIFFERENT windows -- an unmatched window downgrades the refusal to a report and says so,
+  because two readings over different windows are not a comparison. And it does not treat
+  "the accessor sees content" as proof the render is dead: the accessor reads PRE track FX,
+  volume and pan, so a MUTED track legitimately reads content and renders to silence.
 
-  *** This is ADDITIVE. No tool changes what it returns, refuses anything it used to accept, or
-  reads different samples. ***
+  The warning now names WHICH branch produced the cross-read, as `crossRead.pathKind`:
+  `accessor_read`, `accessor_failed`, or `no_sibling_path`. It previously selected on a bare
+  availability boolean, so a read whose accessor path EXISTED AND FAILED was reported as
+  "no independent read path exists for this target" -- the right verdict attached to the
+  wrong reason. A fail-closed fourth branch names an unaccounted state rather than borrowing
+  the nearest plausible one.
 
-  The fix behind it is ours. The accessor substituted a plausible sample rate for a source that
-  reported zero, and a channel count of 2 for one that reported less than one -- exactly the two
-  fields REAPER zeroes when it cannot open a source. So the read looked identical whether the
-  media was there or not, and three separate investigations concluded the datum did not exist.
-  It did. A defensive default is a detector-killer: code that swaps a plausible value in for a
-  missing one destroys the evidence that it was missing.
+  *** Behaviour change: a call that previously returned a silent measurement can now refuse.
+  *** Pass allowSilent:true for the previous behaviour, with both readings attached.
 
-  The predicate now lives in its own REAPER-free header so its whole truth table is testable, and
-  unit.source_probe carries two controls that must FIRE: the pre-fix defaults reproducing the
-  identical-read null, and the predicate stripped of its quarter-note guard reporting an ordinary
-  MIDI take as a broken source. The second is the expensive direction -- a detector that fires on
-  healthy content is a detector its users switch off.
-
-  Surface 190 tools / 4 resources / 5 prompts (was 190 / 3 / 5). ctest 27 -> 28.
-  docs/REFERENCE.md is regenerated: it had not been regenerated when the resource landed.
+  Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 28, unmoved.

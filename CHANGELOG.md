@@ -6,6 +6,39 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.13.0] — 2026-08-18
+
+Refusal release: `analysis.meter` will no longer REPORT a digital silence that two
+independent read paths disagree about over the same bounded window.
+
+`analysis.meter` renders to measure. When that render comes back all-zero the tool used to
+report the silence as a measurement, and a dead render path is byte-for-byte
+indistinguishable from a genuinely silent one -- the same `-144.0` on every channel, the
+same `rawStats` carrying `LENGTH` alone, no `error` key, and elapsed times that do not
+discriminate either. The tool now cross-reads the same window through
+`analysis.accessor_meter`, which reads the track without rendering, and when the two paths
+disagree it refuses the CLAIM rather than the call: `render_silent_unconfirmed`. Pass
+`allowSilent` and it reports anyway, attaching BOTH readings and `windowMatched` so the
+disagreement is in the payload rather than in a footnote.
+
+Two things it deliberately does NOT do. It does not refuse when the two reads covered
+DIFFERENT windows -- an unmatched window downgrades the refusal to a report and says so,
+because two readings over different windows are not a comparison. And it does not treat
+"the accessor sees content" as proof the render is dead: the accessor reads PRE track FX,
+volume and pan, so a MUTED track legitimately reads content and renders to silence.
+
+The warning now names WHICH branch produced the cross-read, as `crossRead.pathKind`:
+`accessor_read`, `accessor_failed`, or `no_sibling_path`. It previously selected on a bare
+availability boolean, so a read whose accessor path EXISTED AND FAILED was reported as
+"no independent read path exists for this target" -- the right verdict attached to the
+wrong reason. A fail-closed fourth branch names an unaccounted state rather than borrowing
+the nearest plausible one.
+
+*** Behaviour change: a call that previously returned a silent measurement can now refuse.
+*** Pass allowSilent:true for the previous behaviour, with both readings attached.
+
+Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 28, unmoved.
+
 ## [1.12.0] — 2026-08-15
 
 Inseglet can now tell you whether a take's media is actually **there**. The surface grows to

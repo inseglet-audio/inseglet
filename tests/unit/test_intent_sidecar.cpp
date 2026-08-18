@@ -463,6 +463,37 @@ int main() {
         check(!intent::classifyRenderSilence({oneTick, zero}).allZero,
               "one 1e-9 sample clears allZero — exact zero, never a threshold");
 
+        // --- THE ANTI-DRIFT CONTROL. The comment above classifyRenderSilence says the
+        // call sites must not drift apart; this release added a FOURTH caller (analysis.meter) through
+        // a new INTERLEAVED overload, so "they share the semantics" stops being a claim and
+        // becomes a test. Identical data, both overloads, identical RenderSilence -- including the
+        // degenerate shapes, which is where two implementations of "every sample is zero" diverge.
+        auto interleave = [](const std::vector<std::vector<float>>& ch) {
+            const size_t nc = ch.size();
+            const size_t nf = nc ? ch[0].size() : 0;
+            std::vector<float> out(nf * nc, 0.0f);
+            for (size_t c = 0; c < nc; ++c)
+                for (size_t f = 0; f < nf && f < ch[c].size(); ++f) out[f * nc + c] = ch[c][f];
+            return out;
+        };
+        auto agree = [&](const std::vector<std::vector<float>>& ch, const char* what) {
+            const std::vector<float> il = interleave(ch);
+            const intent::RenderSilence a = intent::classifyRenderSilence(ch);
+            const intent::RenderSilence b = intent::classifyRenderSilence(
+                il.empty() ? nullptr : il.data(), ch.empty() ? 0 : ch[0].size(), (int)ch.size());
+            check(a.allZero == b.allZero && a.channels == b.channels &&
+                  a.zeroChannels == b.zeroChannels, what);
+        };
+        agree({zero, zero, zero}, "overloads agree: all-zero");
+        agree(partial, "overloads agree: 1 fed of 12 (the over-reach shape)");
+        agree({tone}, "overloads agree: single fed channel");
+        agree({oneTick, zero}, "overloads agree: one 1e-9 sample");
+        agree({}, "overloads agree: no channels at all");
+        agree({std::vector<float>(), std::vector<float>()}, "overloads agree: zero FRAMES");
+        // and the null guard: a null pointer with frames > 0 is a CALLER BUG, not silence
+        check(!intent::classifyRenderSilence(nullptr, 128, 4).allZero,
+              "null buffer with frames>0 is NOT reported as allZero");
+
         // --- the refusal text carries the census and names both the remedy and the escape hatch
         const std::string d = intent::renderSilenceDetail(all);
         const std::string r = intent::renderSilenceRemedy();

@@ -1,6 +1,6 @@
 # REAPER MCP — Tool, Resource & Prompt Reference
 
-> **Generated** 2026-08-14 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
+> **Generated** 2026-08-17 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
 
 
 **Protocol:** MCP `2025-06-18` · **Surface:** 190 tools · 4 resources · 5 prompts.
@@ -15652,12 +15652,13 @@ Returns a structured object with: `boundsFlag`, `channels`, `detail`, `dryRun`, 
 
 **Profile:** `analysis` · **Hints:** read-only, idempotent
 
-Full multichannel meter for a master or bus (READ-ONLY). Reports PROGRAM loudness from REAPER's native RENDER_STATS (integrated LUFS, short-term/momentary max, loudness range, true-peak, sample peak — ITU-R BS.1770) AND per-channel metrics the render engine cannot give: per-channel RMS, sample peak, oversampled true-peak (dBTP) and K-weighted level, with SMPTE bed-layout labels (5.1/7.1/7.1.4/9.1.6/22.2) and LFE flagged. Also reports L/R phase correlation (mono/downmix compatibility). Runs ONE bounded, non-destructive analysis render (snapshots + restores every RENDER_* field + selection; the temp file is deleted after reading) using the measure-don't-limit config, so a headroomed master is measured exactly. Bound the range with boundsFlag (0 = custom startPos/endPos, 1 = ENTIRE PROJECT — the default, 2 = time selection) to fit the call window and avoid a long synchronous render. Complements analysis.check_deliverable (spec pass/fail) and analysis.spatial_field (ambisonic direction).
+Full multichannel meter for a master or bus (READ-ONLY). Reports PROGRAM loudness from REAPER's native RENDER_STATS (integrated LUFS, short-term/momentary max, loudness range, true-peak, sample peak — ITU-R BS.1770) AND per-channel metrics the render engine cannot give: per-channel RMS, sample peak, oversampled true-peak (dBTP) and K-weighted level, with SMPTE bed-layout labels (5.1/7.1/7.1.4/9.1.6/22.2) and LFE flagged. Also reports L/R phase correlation (mono/downmix compatibility). Runs ONE bounded, non-destructive analysis render (snapshots + restores every RENDER_* field + selection; the temp file is deleted after reading) using the measure-don't-limit config, so a headroomed master is measured exactly. Bound the range with boundsFlag (0 = custom startPos/endPos, 1 = ENTIRE PROJECT — the default, 2 = time selection) to fit the call window and avoid a long synchronous render. Complements analysis.check_deliverable (spec pass/fail) and analysis.spatial_field (ambisonic direction). REFUSES to report an all-zero render as measured silence when a render-free accessor read of the same track disagrees (render_silent_unconfirmed) -- the signature alone cannot separate genuine silence from a render that never happened; pass allowSilent:true to report it anyway with both readings attached.
 
 **Parameters**
 
 | Param | Type | Required | Notes |
 | --- | --- | --- | --- |
+| `allowSilent` | boolean | no | default `false` |
 | `boundsFlag` | integer | no | default `1`; range [0, 7] |
 | `dryRun` | boolean | no | default `false` |
 | `endPos` | number | no | — |
@@ -15669,7 +15670,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `boundsFlag`, `channels`, `channelsDetail`, `detail`, `downmix`, `dryRun`, `error`, `layout`, `measuredSource`, `plan`, `program`, `rawStats`, `remediation`, `target`, `warnings`.
+Returns a structured object with: `boundsFlag`, `channels`, `channelsDetail`, `crossRead`, `detail`, `downmix`, `dryRun`, `error`, `layout`, `measuredSource`, `plan`, `program`, `rawStats`, `remediation`, `renderSilence`, `target`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -15678,6 +15679,10 @@ Returns a structured object with: `boundsFlag`, `channels`, `channelsDetail`, `d
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "allowSilent": {
+        "default": false,
+        "type": "boolean"
+      },
       "boundsFlag": {
         "default": 1,
         "maximum": 7,
@@ -15718,6 +15723,9 @@ Returns a structured object with: `boundsFlag`, `channels`, `channelsDetail`, `d
       "channelsDetail": {
         "type": "array"
       },
+      "crossRead": {
+        "type": "object"
+      },
       "detail": {
         "type": "string"
       },
@@ -15747,6 +15755,9 @@ Returns a structured object with: `boundsFlag`, `channels`, `channelsDetail`, `d
       },
       "remediation": {
         "type": "string"
+      },
+      "renderSilence": {
+        "type": "object"
       },
       "target": {
         "type": "string"
@@ -16963,4 +16974,4 @@ Scaffold an immersive Dolby Atmos session — a bed, N object tracks, a binaural
 
 ---
 
-_Reference generated 2026-08-14 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._
+_Reference generated 2026-08-17 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._

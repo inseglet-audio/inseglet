@@ -257,6 +257,34 @@ inline RenderSilence classifyRenderSilence(const std::vector<std::vector<float>>
     return v;
 }
 
+// ---- INTERLEAVED OVERLOAD -------------------------------------------------------------------
+// analysis.meter ALREADY HOLDS the rendered samples (meter::AudioBuffer, interleaved float32), so
+// the detector costs ZERO at that call site: no copy, no deinterleave, no second pass over the
+// audio.  It takes a raw pointer rather than the buffer type on purpose -- this header must stay
+// free of any dependency on ambisonic_meter.h.
+// The comment above says the call sites must not drift apart.  A FOURTH caller makes that a
+// TESTABLE claim rather than a hope: unit.intent feeds identical data through BOTH overloads and
+// asserts the RenderSilence values are identical, including the degenerate cases (zero frames,
+// zero channels) where "every sample is zero" is vacuously true in one and structurally
+// different in the other.
+inline RenderSilence classifyRenderSilence(const float* interleaved, std::size_t frames,
+                                           int channels) {
+    RenderSilence v;
+    v.channels = channels > 0 ? channels : 0;
+    if (!interleaved && frames > 0) { v.channels = 0; return v; }
+    for (int c = 0; c < v.channels; ++c) {
+        bool zero = true;
+        for (std::size_t f = 0; f < frames; ++f) {
+            if (interleaved[f * (std::size_t)v.channels + (std::size_t)c] != 0.0f) {
+                zero = false; break;
+            }
+        }
+        if (zero) ++v.zeroChannels;
+    }
+    v.allZero = (v.channels > 0 && v.zeroChannels == v.channels);
+    return v;
+}
+
 // One refusal text shared by every authoring site, so the three cannot drift apart. It names the
 // condition, states plainly that the tool cannot tell the two cases apart, and points at the
 // accessor path — which was measured device-independent when the render path was dead.

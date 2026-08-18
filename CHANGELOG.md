@@ -6,6 +6,16 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.13.1] — 2026-08-18
+
+Hygiene release: a user-facing warning no longer cites an internal engineering document.
+
+`analysis.meter`'s `CROSS_NO_SIBLING` warning — the one that fires when a digital-silence
+render has no independent read path to check it against — carried a parenthetical citation
+to an internal document. The sentence is unchanged in meaning; the citation is removed.
+
+Surface 190 tools / 4 resources / 5 prompts — unmoved. Unit suite 28, unmoved.
+
 ## [1.13.0] — 2026-08-18
 
 Refusal release: `analysis.meter` will no longer REPORT a digital silence that two

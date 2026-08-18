@@ -415,7 +415,7 @@ int main() {
               "jsonEscape round-trips quotes/backslash/newline");
     }
 
-    // ==== F-160.5 / DIRECTIVE 70 — the render-silence classifier ====
+    // ==== the render-silence classifier ====
     // The fail-open's whole mechanism is that -120/-70/0 is the arithmetic image of an
     // identically-zero channel rather than a measurement of one. These pin BOTH halves: the
     // floors are exact constants, and the classifier separates "nothing rendered" from the
@@ -439,7 +439,7 @@ int main() {
         check(all.allZero && all.channels == 3 && all.zeroChannels == 3,
               "all-zero image classifies as allZero");
 
-        // --- THE OVER-REACH CONTROL (directive 64). The live fixture B is a legitimate
+        // --- THE OVER-REACH CONTROL. The live fixture B is a legitimate
         // 7.1.4 deliverable with ONE channel fed: eleven of its twelve channels sit on the exact
         // floor triple. If a single fed channel does not clear the refusal, the guard eats real
         // work. This is the assertion that can actually kill the design.

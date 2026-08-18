@@ -175,7 +175,7 @@ struct Biquad {
 // reference implementations (e.g. libebur128 / pyloudnorm).
 inline Biquad k1ShelfBiquad(double fs) {
     const double f0 = 1681.9744509555319;
-    // F-158.2: this was 3.99984385397 (12 significant digits). The reference value carries
+    // Historically this was 3.99984385397 (12 significant digits). The reference value carries
     // 16, and the truncation propagated into b1 = 2(K^2 - Vh)/a0 as a 1.044942e-12 error
     // against Table 1 -- which is exactly the "1.045e-12 shelf agreement" recorded earlier
     // and attributed to the TABLE's own precision. It was ours, not the table's.
@@ -201,7 +201,7 @@ inline Biquad k2HighpassBiquad(double fs) {
     const double a0 = 1.0 + K / Q + K * K;
     Biquad bq;
     // BS.1770-4 Table 1 keeps the RLB numerator as exactly [1, -2, 1] — it is NOT divided
-    // by a0, unlike the shelf's. Dividing it (as this did before F-156.1) forces the
+    // by a0, unlike the shelf's. Dividing it (as this once did) forces the
     // passband gain to exactly 1.0, while the tabulated filter's is a0 (1.004994898715 at
     // 48 kHz). The -0.691 offset is calibrated against the TABULATED filter, so the
     // normalised form reads low by 20*log10(a0): 0.047099 / 0.043277 / 0.023566 /

@@ -49,12 +49,12 @@
 
 namespace reaper_mcp {
 
-// ---- The canonical accepted-bed-layout table (F-143.1) -----------------------------
+// ---- The canonical accepted-bed-layout table -----------------------------
 // The single source of truth for "which bed layouts does the product accept". Every layout-
 // dependent table in this file must cover every entry, and `unit.bed_weights` walks this table and
-// FAILS if one does not — so the next layout cannot repeat F-143.1.
+// FAILS if one does not — so the next layout cannot repeat that defect.
 //
-// F-143.1: 7.1.2 was the DEFAULT `bedLayout` in three spatial tool schemas while
+// Historically: 7.1.2 was the DEFAULT `bedLayout` in three spatial tool schemas while
 // bedChannelLabels() had no `case 10`. A 7.1.2 bed therefore fell through to generic "ch0".."ch9"
 // labels, lost BOTH its Lss/Rss 1.41 cells (reading 0.350 LU LOW — measured), and
 // reported its layout as "multichannel". Nothing failed; the number was quietly wrong, including
@@ -88,7 +88,7 @@ inline const std::vector<BedLayoutEntry>& bedAcceptedLayouts() {
 
 // Channel width for an accepted bed layout; returns `missing` when the name is not in the table.
 //
-// THE single width lookup for the whole product.  (F-143.2) deleted FIVE hand-rolled
+// THE single width lookup for the whole product. A later change deleted FIVE hand-rolled
 // copies of this mapping — admBedChannels, export_adm's and export_damf's hostBedCh,
 // orchestrate_sends' and send_layout_inspect's layoutWidth — each of which had to remember
 // 7.1.2 separately, and one consumer (spatial.inject_identity_tones) had no copy at all and so
@@ -108,7 +108,7 @@ inline std::string bedLayoutName(int nch) {
         case 2:  return "stereo";
         case 6:  return "5.1";
         case 8:  return "7.1";
-        case 10: return "7.1.2";   //  / F-143.1 — was reported as "multichannel"
+        case 10: return "7.1.2";   // was reported as "multichannel"
         case 12: return "7.1.4";
         case 16: return "9.1.6";
         case 24: return "22.2";
@@ -121,7 +121,7 @@ inline std::vector<std::string> bedChannelLabels(int nch) {
         case 2:  return {"L", "R"};
         case 6:  return {"L", "R", "C", "LFE", "Ls", "Rs"};
         case 8:  return {"L", "R", "C", "LFE", "Lss", "Rss", "Lsr", "Rsr"};
-        // 7.1.2 (F-143.1). Order matches tools_spatial.cpp's admBedSpeakers("7.1.2")
+        // 7.1.2. Order matches tools_spatial.cpp's admBedSpeakers("7.1.2")
         // and 7.1.4's first ten channels; the front height pair is the one 7.1.2 carries
         // (: our U±045 top-FRONT pair). Spelling follows THIS file's Lsr/Rsr convention,
         // not admBedSpeakers' Lrs/Rrs — the divergence is documented above and is a founder call.

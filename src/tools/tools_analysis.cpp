@@ -348,7 +348,7 @@ inline AccessorRead readAccTarget(const AccTarget& t, const Json& a) {
                     : readTrackContent(t.track, rate, start, dur);
 }
 
-// The RAW source-validity rows behind every accessor read (F-184.4). `available` is null -- never
+// The RAW source-validity rows behind every accessor read. `available` is null -- never
 // true -- when this path queried no source, because a detector that cannot fail is not a detector.
 inline Json accSourceBlock(const AccessorRead& r) {
     Json s{{"queried", r.sourcesQueried},
@@ -835,7 +835,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             Json warnings = Json::array();
             const int nc = tr.buf.channels;
 
-            // ---- F-160.5 / DIRECTIVE 70, ONE CALL SITE OVER ----------------------------------
+            // ---- THE SAME REFUSAL, ONE CALL SITE OVER ---------------------------------------
             // The three export sites already refuse to AUTHOR a silence they cannot vouch for.
             // analysis.meter REPORTS one -- and a report is a claim too.  A live gate met twelve
             // channels of confident silence, ok:true, no warning, while the accessor read the same
@@ -858,15 +858,15 @@ void registerAnalysisTools(ToolRegistry& reg) {
                 const bool allowSilent = optBool(a, "allowSilent", false);
                 bool contradicted = false, crossAvailable = false;
                 // ⛔ WHICH BRANCH SET `crossRead` IS A FACT THE WARNING NEEDS, AND A BARE BOOL
-                // CANNOT CARRY IT (F-195.5).  `crossAvailable == false` was true for
+                // CANNOT CARRY IT.  `crossAvailable == false` was true for
                 // TWO different states -- a target with no accessor sibling, and a target whose
                 // accessor read FAILED -- so the master's reason was printed for an accessor
-                // failure.  Directive 111: two states no instrument distinguishes are one state.
-                // Directive 124(b): report WHICH case fired.
+                // failure. Two states no instrument distinguishes are one state.
+                // Report WHICH case fired.
                 enum CrossPathKind { CROSS_NOT_ATTEMPTED, CROSS_OK,
                                      CROSS_ACCESSOR_FAILED, CROSS_NO_SIBLING };
                 CrossPathKind crossPath = CROSS_NOT_ATTEMPTED;
-                // ---- THE WINDOW MUST MATCH, OR THE COMPARISON IS NOT ONE (F-195.4).
+                // ---- THE WINDOW MUST MATCH, OR THE COMPARISON IS NOT ONE.
                 // The render is bounded by boundsFlag; the accessor read is bounded by its own
                 // arguments, and durSec <= 0 means THE WHOLE EXTENT.  The first live call of this
                 // code compared a 4 s render against a 102 s accessor read and reported a
@@ -940,7 +940,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                     // would report silence BY CONSTRUCTION and CONFIRM a dead render.  A
                     // cross-read that cannot fail is a rubber stamp with a second number on it.
                     // So none is manufactured, and the absence is a NAMED FIELD rather than prose
-                    // (F-191.1: the next reader is a program).
+                    // (the next reader is a program).
                     crossPath = CROSS_NO_SIBLING;
                     crossRead = Json{
                         {"available", false},
@@ -987,7 +987,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         "same as proof of it.");
                 // ⛔ THE TAIL SELECTS ON WHICH BRANCH SET `crossRead`, NOT ON A BARE BOOL.
                 // An accessor path that EXISTS AND FAILED is not an absent accessor path, and
-                // saying so is the part a human acts on (F-195.5).
+                // saying so is the part a human acts on.
                 else if (crossPath == CROSS_ACCESSOR_FAILED)
                     warnings.push_back(
                         "the render is digital silence on all " + std::to_string(sil.channels) +
@@ -1004,7 +1004,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         "from a render that never happened, so nothing is claimed here.");
                 else
                     // FAIL CLOSED: an unaccounted cross-read state names itself rather than
-                    // borrowing the nearest plausible reason (directive 115's shape in prose).
+                    // borrowing the nearest plausible reason — a defensive default, in prose.
                     warnings.push_back(
                         "the render is digital silence on all " + std::to_string(sil.channels) +
                         " channels and the cross-read state is UNACCOUNTED FOR (see "

@@ -19,6 +19,16 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.13.1" author="James Livingston" time="2026-08-18T21:22:10Z">
+        <changelog><![CDATA[Hygiene release: a user-facing warning no longer cites an internal engineering document.
+
+`analysis.meter`'s CROSS_NO_SIBLING warning -- the one that fires when a digital-silence
+render has no independent read path to check it against -- carried a parenthetical citation
+to an internal document. The sentence is unchanged in meaning; the citation is removed.
+
+Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. Unit suite 28, unmoved.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.13.1/reaper_mcp.dylib</source>
+      </version>
       <version name="1.13.0" author="James Livingston" time="2026-08-18T00:00:00Z">
         <changelog><![CDATA[Refusal release: `analysis.meter` will no longer REPORT a digital silence that two
 independent read paths disagree about over the same bounded window.

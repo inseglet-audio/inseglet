@@ -183,7 +183,7 @@ int main() {
         check(near(m2.kLevelLkfs - m1k.kLevelLkfs, 6.02, 0.05), "doubling amplitude: +6 dB K-level");
     }
 
-    // ---- 4b. F-156.1: the K-weighting biquads must match BS.1770-4 Table 1 ----
+    // ---- 4b. The K-weighting biquads must match BS.1770-4 Table 1 ----
     // Section 4 above gates the K-curve against FLATNESS at 1 kHz to +/- 1.2 dB. That is 28x
     // too loose to see a 0.043 dB error, which is how the RLB numerator sat non-conformant
     // through every prior release. A conformance check must gate against the TABLE, not
@@ -216,14 +216,14 @@ int main() {
         const double den = 1.0 - hp.a1 + hp.a2;
         check(near((hp.b0 - hp.b1 + hp.b2) / den, a0, kT1Tol), "RLB passband gain is a0");
 
-        // NEGATIVE CONTROL. Rebuild the pre-F-156.1 form and prove this check REJECTS it.
+        // NEGATIVE CONTROL. Rebuild the earlier form and prove this check REJECTS it.
         // A conformance check that cannot fail the known-bad filter is not a check --
         // it can only agree, and a control that can only agree is not a control.
         const double oldGain = ((1.0 / a0) - (-2.0 / a0) + (1.0 / a0)) / den;
         check(near(oldGain, 1.0, kT1Tol), "control: the OLD normalised RLB gain was exactly 1.0");
         check(!near(1.0 / a0, 1.0, kT1Tol), "control: this check REJECTS the pre-fix numerator");
         check(near(20.0 * std::log10(a0 / oldGain), 0.04327714626081623, 1e-9),
-              "control: F-156.1 was worth 0.043277 LU at 48 kHz");
+              "control: the correction was worth 0.043277 LU at 48 kHz");
 
         // And the offset at every rate the product supports, so a regression names its own
         // magnitude. Values recorded earlier and re-derived when the fix landed.

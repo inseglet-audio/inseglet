@@ -11,7 +11,7 @@
 // signal — `GetMediaSourceSampleRate` returns 0 and `GetMediaSourceLength` returns 0.0 on an
 // unavailable source, and we overwrote both before anyone could look.
 //
-//   DIRECTIVE 115 — A DEFENSIVE DEFAULT IS A DETECTOR-KILLER.
+//   A DEFENSIVE DEFAULT IS A DETECTOR-KILLER.
 //
 // So the predicate lives here, free of every REAPER symbol, and `tests/unit/test_source_probe.cpp`
 // walks its whole truth table on a host build — including the negative control that REPRODUCES the

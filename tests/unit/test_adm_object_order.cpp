@@ -92,7 +92,7 @@ int main() {
     const std::string xml = buildAxml(m);
     const std::vector<std::string> seq = elementSequence(xml);
 
-    // --- the instrument can see a presence (directive 14): a hand-built interleaved document
+    // --- the instrument can see a presence: a hand-built interleaved document
     // in the shape the importer refuses MUST trip the predicate. Without this, a green result
     // below would be indistinguishable from a predicate that never fires.
     const std::string interleaved =

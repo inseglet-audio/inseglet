@@ -69,7 +69,7 @@ inline double toneHz(int k) { return kBaseHz + kStepHz * (double)k; }
 
 inline double dbToLin(double db) { return std::pow(10.0, db / 20.0); }
 
-// ---- Content addressing (F-149.1) --------------------------------------------------------------
+// ---- Content addressing --------------------------------------------------------------
 // REAPER keeps a per-PATH PCM cache that rewriting the file does NOT invalidate, so a filename
 // fixed by nothing but the slot index silently serves the FIRST audio ever loaded at that path
 // while the tool response faithfully echoes the parameters it was asked for. Measured:

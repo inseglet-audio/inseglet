@@ -231,8 +231,8 @@ target_link_libraries(reaper_mcp_adm_dolby_meta_test PRIVATE Threads::Threads)
 add_test(NAME unit.adm_dolby_meta COMMAND reaper_mcp_adm_dolby_meta_test)
 
 # --- Unit: the source-validity predicate (source_probe.h; header-only, no REAPER) --------------
-# Pins F-184.4's fix. Three investigations measured a null on source validity that this tree's own
-# defensive fallbacks had manufactured (directive 115), so this suite carries TWO controls that
+# Pins the fix. Three investigations measured a null on source validity that this tree's own
+# defensive fallbacks had manufactured, so this suite carries TWO controls that
 # must FIRE: the pre-fix defaults reproducing the identical-envelope null, and the predicate
 # stripped of its `!lengthIsQN` term reporting an ordinary MIDI take as a broken source. The
 # second is the expensive direction — a detector that fires on healthy content gets switched off.

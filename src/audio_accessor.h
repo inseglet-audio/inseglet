@@ -51,7 +51,7 @@ struct AccessorRead {
     bool stateChanged = false;    // accessor state was stale and revalidated before reading
 
     // ---- RAW source readings, taken BEFORE any fallback can stand in for them ------------------
-    // F-184.4 / directive 115. REAPER reports a source it cannot currently open as sampleRate 0,
+    // REAPER reports a source it cannot currently open as sampleRate 0,
     // length 0.0 and numChannels < 1 -- and the two fallbacks in this header used to substitute a
     // plausible value for exactly those fields, so three investigations measured a null on source validity
     // that our own code had manufactured. The READ BEHAVIOUR IS UNCHANGED: these fields report what

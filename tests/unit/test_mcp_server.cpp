@@ -2478,19 +2478,19 @@ int main() {
         check(moving, "flyby is reported moving with ~180 deg of angular travel");
     }
 
-    // --- F-143.2 guard: every ADVERTISED bedLayout must be ACCEPTED at runtime ----------------
+    // --- Guard: every ADVERTISED bedLayout must be ACCEPTED at runtime ------------------------
     //
-    // F-143.2: spatial.inject_identity_tones advertised "7.1.2" in its bedLayout
+    // Historically: spatial.inject_identity_tones advertised "7.1.2" in its bedLayout
     // schema enum and then REFUSED it at runtime ("unknown bedLayout: 7.1.2"), because
     // tools_spatial.cpp's bedLayouts() had no 7.1.2 row and every other consumer grafted the
     // layout in by hand (`if (layout == "7.1.2")`). The schema enum was the only place in the
-    // product that believed 7.1.2 was uniformly supported. Same shape as F-143.1 one level up:
+    // product that believed 7.1.2 was uniformly supported. The same shape one level up:
     // a table that ENUMERATES beside consumers that GENERALISE.
     //
     // The invariant is ADVERTISE => ACCEPT, walked mechanically across the WHOLE registry, so a
     // tool written next year is covered without anyone remembering this bug.
     //
-    // DIRECTIVE 29: a check that can be satisfied FOR FREE is not a check. A tool that
+    // A check that can be satisfied FOR FREE is not a check. A tool that
     // throws on a missing required arg never reaches its layout lookup, so "no unknown-layout
     // error" would pass VACUOUSLY. Every (tool, layout) pair therefore carries its own negative
     // control: the same call with a deliberately bogus layout MUST produce the unknown-layout
@@ -2526,7 +2526,7 @@ int main() {
             if (!bl.is_object() || !bl.contains("enum") || !bl["enum"].is_array()) continue;
             ++advertisers;
 
-            // Per-pair reachability control (directive 14: establish the check RAN).
+            // Per-pair reachability control (establish the check RAN).
             const bool reachable = isLayoutRefusal(invoke(t, "9.9.9"));
             if (!reachable) {
                 pairsUnreachable += (int)bl["enum"].size();
@@ -2550,13 +2550,13 @@ int main() {
         check(pairsChecked > 0, "advertise=>accept guard reached at least one (tool, layout) pair");
         check(coversInjectIdentityTones,
               "advertise=>accept guard still reaches spatial.inject_identity_tones — the tool "
-              "F-143.2 was found in; if this fails the guard has stopped covering its own bug");
+              "the defect was found in; if this fails the guard has stopped covering its own bug");
         std::fprintf(stderr, "  [advertise=>accept] %d advertiser(s), %d pair(s) checked, "
                              "%d unreachable\n", advertisers, pairsChecked, pairsUnreachable);
 
         // Cross-check WIDTH against the canonical table (src/bed_weights.h), so the accepted-layout
-        // table and the tool surface cannot drift apart silently — that drift IS F-143.1.
-        // Directive 29: assert the VALUE that encodes the invariant (the exact channel count),
+        // table and the tool surface cannot drift apart silently — that drift IS the defect.
+        // Assert the VALUE that encodes the invariant (the exact channel count),
         // never merely that a lookup succeeded.
         const Tool* iit = tools.find("spatial.inject_identity_tones");
         check(iit != nullptr, "spatial.inject_identity_tones is registered");

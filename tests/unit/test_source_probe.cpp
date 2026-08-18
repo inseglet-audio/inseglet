@@ -8,7 +8,7 @@
 // measuring a null that our own code manufactured: `audio_accessor.h` substituted a plausible
 // sample rate and channel count for the two fields REAPER zeroes on an unavailable source, so the
 // accessor reported an IDENTICAL envelope across online -> offline -> online and the programme
-// concluded the datum was not there. It was. DIRECTIVE 115 — A DEFENSIVE DEFAULT IS A
+// concluded the datum was not there. It was. A DEFENSIVE DEFAULT IS A
 // DETECTOR-KILLER.
 //
 // This suite therefore carries TWO negative controls, because this predicate can be wrong in two
@@ -22,7 +22,7 @@
 //      every MIDI take in the project as a broken source. That is the expensive failure: a
 //      detector that fires on ordinary healthy content gets switched off by its users.
 //
-// A control that can only agree is not a control (directive 64), so both are asserted to FIRE.
+// A control that can only agree is not a control, so both are asserted to FIRE.
 
 #include <cstdio>
 #include <string>
@@ -64,7 +64,7 @@ int main() {
     live.sampleRate = 48000;
     live.lengthSec = 6.0;
 
-    // The SAME source after action.run {command: 40100}, or after a deactivation edge (F-184.3):
+    // The SAME source after action.run {command: 40100}, or after a deactivation edge:
     // REAPER zeroes the rate and the length. Measured live, 3/3 takes.
     SourceProbe offline;
     offline.present = true;

@@ -283,7 +283,7 @@ int main() {
         check(it::toneHz(127) < 24000.0, "the widest legal slot still fits below Nyquist @48k");
     }
 
-    // ==== F-149.1: the WAV path is content-addressed ==========================================
+    // ==== The WAV path is content-addressed ===================================================
     // The defect was never in the DSP — the writer was always correct. It was that one filename
     // served two different audios, and REAPER's per-path PCM cache then handed back the first.
     // So the property to pin is a property of contentTag, and it is pinned in BOTH directions:
@@ -297,9 +297,9 @@ int main() {
         const std::string wb = loomb::writeWavPcm(cb, b.frames(), 48000, 24);
 
         // positive control: the two fixtures really do differ, so the test below is reachable
-        check(wa != wb, "F-149.1 control: -18 dBFS and -30 dBFS render to different bytes");
+        check(wa != wb, "control: -18 dBFS and -30 dBFS render to different bytes");
         check(wa.size() == wb.size(),
-              "F-149.1 control: and they are the SAME SIZE — which is why size cannot be the "
+              "control: and they are the SAME SIZE — which is why size cannot be the "
               "cache key and the old filename collided");
 
         const std::string ta = it::contentTag(wa);
@@ -307,15 +307,15 @@ int main() {
         check(ta.size() == 12 && tb.size() == 12, "contentTag is 12 hex characters");
         check(ta.find_first_not_of("0123456789abcdef") == std::string::npos,
               "contentTag is lowercase hex and therefore filename-safe on every platform");
-        check(ta != tb, "F-149.1: DIFFERENT audio gets a DIFFERENT path — the defect is closed");
+        check(ta != tb, "DIFFERENT audio gets a DIFFERENT path — the defect is closed");
         check(ta == it::contentTag(wa),
-              "F-149.1: IDENTICAL audio gets the IDENTICAL path — determinism preserved");
+              "IDENTICAL audio gets the IDENTICAL path — determinism preserved");
 
         // negative control: the guard must be able to say no. A one-bit change must move the tag,
         // or an 'always different' tag would pass the line above for the wrong reason.
         std::string wc = wa;
         wc[wc.size() / 2] = (char)(wc[wc.size() / 2] ^ 0x01);
-        check(it::contentTag(wc) != ta, "F-149.1 negative control: a single flipped bit moves the tag");
+        check(it::contentTag(wc) != ta, "negative control: a single flipped bit moves the tag");
     }
 
     // ==== constantHz, and the degenerate-plan refusal it exposed ========================

@@ -221,7 +221,7 @@ inline double activeFraction(const std::vector<float>& x, int rate) {
 }
 
 // ============================================================================================
-// Render-silence classification (F-160.5, DIRECTIVE 70).
+// Render-silence classification.
 //
 // The three functions directly above are the whole mechanism of the fail-open. On an
 // identically-zero channel rmsDb() returns EXACTLY -120.0, clampLufs() floors at EXACTLY -70.0

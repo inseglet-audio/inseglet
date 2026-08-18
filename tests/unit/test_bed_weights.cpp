@@ -48,7 +48,7 @@ int main() {
     checkVector(12, {1, 1, 1, 0, 1.41, 1.41, 1.0, 1.0, 1, 1, 1, 1},
                 "7.1.4 (rears 1.0, heights unconditionally 1.0)");
     checkVector(10, {1, 1, 1, 0, 1.41, 1.41, 1.0, 1.0, 1, 1},
-                "7.1.2 (F-143.1: had NO case 10, so both 1.41 cells were missing)");
+                "7.1.2 (had NO case 10, so both 1.41 cells were missing)");
     checkVector(16, {1, 1, 1, 0, 1.41, 1.41, 1.0, 1.0, 1.41, 1.41, 1, 1, 1, 1, 1, 1},
                 "9.1.6 (Lw/Rw M±060 boundary-INCLUSIVE 1.41; rears 1.0; heights 1.0)");
     {
@@ -76,7 +76,7 @@ int main() {
               "7.1.2 labels: sides Lss/Rss, rears Lsr/Rsr, FRONT height pair Ltf/Rtf ");
         check(bedLayoutName(12) == "7.1.4" && bedLayoutName(16) == "9.1.6" &&
                   bedLayoutName(10) == "7.1.2" && bedLayoutName(7) == "multichannel",
-              "layout names (F-143.1: 10 ch used to report \"multichannel\")");
+              "layout names (10 ch used to report \"multichannel\")");
         for (int nch : {2, 6, 8, 12, 16, 24, 5})
             if ((int)bedChannelWeights(nch).size() != nch) {
                 check(false, "weights.size() == nch for " + std::to_string(nch));
@@ -122,8 +122,8 @@ int main() {
                   " dB hotter than pre-fix (expect 1.492)");
     }
 
-    // ==== E-143.2 — the GENERALISING GUARD (F-143.1) =============================
-    // The invariant that would have caught F-143.1, stated over the canonical accepted-layout
+    // ==== E-143.2 — the GENERALISING GUARD =============================
+    // The invariant that would have caught it, stated over the canonical accepted-layout
     // table rather than a hand-list: every layout the product accepts must have a real label row,
     // because bedChannelWeights() derives ENTIRELY from labels — a generic "chN" row silently
     // yields an all-1.0 weight vector and a quietly wrong loudness figure. The one permitted
@@ -156,7 +156,7 @@ int main() {
         }
     }
 
-    // ==== E-143.3 — the quantitative pin for F-143.1, both ways ============================
+    // ==== E-143.3 — the quantitative pin, both ways ========================================
     // Side-only 7.1.2 content: the pre-fix all-1.0 vector must read exactly 10·log10(1.41) COLDER
     // than the conformant table, and the whole-bed error on the identity fixture is the
     // 0.350 LU recorded in the finding. Shown BOTH ways so the pin fails if either drifts.
@@ -175,7 +175,7 @@ int main() {
                          meter::gatedLoudness(side, preFix712).integratedLufs;
         check(near(d, 10.0 * std::log10(1.41), 0.01),
               "7.1.2 side-only: conformant reads " + std::to_string(d) +
-                  " dB hotter than the pre-F-143.1 default (expect 1.492)");
+                  " dB hotter than the previous default (expect 1.492)");
     }
 
     if (g_failures) {

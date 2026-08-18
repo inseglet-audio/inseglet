@@ -121,7 +121,7 @@ const std::vector<BedLayout>& bedLayouts() {
          {"L", "R", "C", "LFE", "Lss", "Rss", "Lrs", "Rrs", "Ltf", "Rtf", "Ltr", "Rtr"},
          {3},
          "Dolby Atmos 7.1.4 bed: 7.1 + 4 tops (front Ltf/Rtf, rear Ltr/Rtr)."},
-        // 7.1.2 (F-143.2). Absent until now: every consumer that needed it grafted it
+        // 7.1.2. Absent until now: every consumer that needed it grafted it
         // in by hand, and spatial.inject_identity_tones — which did not — refused a layout its
         // own schema advertised. Labels use THIS file's Lrs/Rrs rear-surround spelling (as do
         // 7.1 / 7.1.4 / 9.1.6 above and adm::speakerPosFor below), NOT bed_weights.h's Lsr/Rsr;
@@ -3363,7 +3363,7 @@ void registerSpatialTools(ToolRegistry& reg) {
         [](const Json& a) -> Json {
             const bool dryRun = optBool(a, "dryRun", false);
             const bool wantIntent = optBool(a, "intentSidecar", false);
-            const bool allowSilent = optBool(a, "allowSilent", false);   // directive 70
+            const bool allowSilent = optBool(a, "allowSilent", false);   // refusal opt-out
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.2");
             const std::string coordMode = optStr(a, "coordinateMode", "spherical");
             const adm::Coord coord = (coordMode == "cartesian") ? adm::Coord::Cartesian
@@ -3665,7 +3665,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                                  "bound the export to audio (boundsFlag=0 + startPos/endPos) and check "
                                  "the bed/object tracks route audio");
 
-            // ---- F-160.5 / DIRECTIVE 70: refuse to author a claim we did not measure.
+            // ---- Refuse to author a claim we did not measure.
             // `render_empty` above catches a render of zero LENGTH. An all-zero render of non-zero
             // length walked straight past it and became a permanent ADM BWF + sidecar asserting
             // silence on every channel, ok:true, no warning. The tool cannot tell "the content is
@@ -3869,7 +3869,7 @@ void registerSpatialTools(ToolRegistry& reg) {
         Profile::Render,
         [](const Json& a) -> Json {
             const bool dryRun = optBool(a, "dryRun", false);
-            const bool allowSilent = optBool(a, "allowSilent", false);   // directive 70
+            const bool allowSilent = optBool(a, "allowSilent", false);   // refusal opt-out
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.2");
             int bitDepth = optInt(a, "bitDepth", 24);
             if (bitDepth != 16 && bitDepth != 24 && bitDepth != 32) bitDepth = 24;
@@ -4067,7 +4067,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                                  "bound the export to audio (boundsFlag=0 + startPos/endPos) and check "
                                  "the bed/object tracks route audio");
 
-            // ---- F-160.5 / DIRECTIVE 70. The finding named only export_adm; the fail-open
+            // ---- The original report named only export_adm; the fail-open
             // is a CLASS. DAMF writes no intent sidecar, so it authors no false LEVEL claim — but
             // it still writes a permanent three-file deliverable out of a render that may never
             // have happened. Same refusal, same escape hatch, one shared text.
@@ -4219,7 +4219,7 @@ void registerSpatialTools(ToolRegistry& reg) {
             namespace lb = loomb;
             const bool dryRun = optBool(a, "dryRun", false);
             const bool wantIntent = optBool(a, "intentSidecar", false);
-            const bool allowSilent = optBool(a, "allowSilent", false);   // directive 70
+            const bool allowSilent = optBool(a, "allowSilent", false);   // refusal opt-out
             const std::string bedLayout = optStr(a, "bedLayout", "7.1.4");
             int bitDepth = optInt(a, "bitDepth", 24);
             if (bitDepth != 16 && bitDepth != 24) bitDepth = 24;
@@ -4527,7 +4527,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                                  "bound the export to audio (boundsFlag=0 + startPos/endPos) and "
                                  "check the source tracks route audio");
 
-            // ---- F-160.5 / DIRECTIVE 70. The third site of the class, and the one the
+            // ---- The third site of the class, and the one the
             // original finding came closest to missing: this path writes an intent sidecar through the
             // SAME intentFillLevels/intentBedLufs, so an all-zero render here produces a whole-bed
             // `expectLufs: -70` on top of the per-channel floor triple. Measured pre-fix on a
@@ -5134,7 +5134,7 @@ void registerSpatialTools(ToolRegistry& reg) {
 
             const auto chans = it::renderPlan(plan);
             std::vector<std::string> paths;
-            // F-149.1 (mechanism measured): the filename is CONTENT-ADDRESSED.
+            // The filename is CONTENT-ADDRESSED.
             // REAPER's per-path PCM cache survives a rewrite of that path, so a name fixed by the
             // slot index alone silently serves the first audio ever loaded there. Hashing the
             // bytes keeps the advertised determinism (same parameters -> same bytes -> same path,

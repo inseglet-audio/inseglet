@@ -27,12 +27,3 @@ __pycache__/
 *.pyc
 .venv/
 
-# One-time ops artifacts (not part of the project)
-/_to_delete/
-/SETUP_INSEGLET.md
-/CODE_FIXES.patch
-/CODE_FIXES_no_azimuth.patch
-/CODE_FIXES.md
-/INSPECTION_REPORT.md
-/DISTRIBUTION_EXCLUDE.md
-/RELEASE_PREP_STEPS.md

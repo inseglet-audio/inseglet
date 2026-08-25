@@ -6,8 +6,18 @@ implementation (`src/tools/tools_spatial.cpp`, `src/spatial_verbs.h`, `src/deliv
 code and this document ever disagree, the code wins and this document is stale. See `docs/REFERENCE.md`
 for the per-tool contracts and `SECURITY.md` for the transport threat model.
 
-Standards basis throughout: loudness and true-peak per **ITU-R BS.1770-5** (K-weighted LKFS/LUFS +
-inter-sample true peak), metered per **EBU Tech 3341** ("EBU Mode"); immersive speaker layouts per
+Standards basis. **Two loudness paths ship, on two revisions of the same recommendation, and both
+citations are deliberate — the revision follows the implementation, not the document:**
+
+- **REAPER's native `RENDER_STATS` program measure** — used by `analysis.meter` for program loudness
+  and by every deliverable-spec check (§5, `src/deliverable_specs.h`) — is quoted per **ITU-R
+  BS.1770-5** (K-weighted LKFS/LUFS + inter-sample true peak).
+- **The in-box C++ gated engine** — which measures what `RENDER_STATS` cannot: stems, objects, the
+  isolated dialog bus and folds that exist only in memory (§3c, `src/ambisonic_meter.h`,
+  `src/bed_weights.h`) — implements **ITU-R BS.1770-4** and is pinned to it by test: Table 1's RLB
+  numerator and Tables 4/5's channel weights, read exactly (`unit.meter`, `unit.bed_weights`).
+
+Metering per **EBU Tech 3341** ("EBU Mode"); immersive speaker layouts per
 **ITU-R BS.2051-3 / BS.775**; the 22.2 grouping per **SMPTE ST 2036-2**; channel beds in SMPTE / Dolby
 Atmos **film order**.
 

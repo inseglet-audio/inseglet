@@ -10,9 +10,15 @@
 // (tools_analysis.cpp) only has to *measure* — via the shared RENDER_STATS loudness path — and hand the
 // numbers here.
 //
-// Standards basis: all integrated-LUFS and
-// true-peak measurement follows ITU-R BS.1770-5 (K-weighted LKFS/LUFS + inter-sample true peak), metered
-// per EBU Tech 3341 ("EBU Mode"). Immersive `layout` values reference ITU-R BS.2051-3 / BS.775. ITU gives
+// Standards basis: integrated-LUFS and true-peak measurement ON THIS PATH — REAPER's native
+// RENDER_STATS program measure, which is what every spec in this table is graded against — follows
+// ITU-R BS.1770-5 (K-weighted LKFS/LUFS + inter-sample true peak), metered
+// per EBU Tech 3341 ("EBU Mode").  ⚠️ It is NOT the only loudness path in the product: the in-box
+// C++ gated engine in ambisonic_meter.h (stems, objects, dialog, in-memory folds) implements
+// BS.1770-4 and is pinned to it by unit.meter / unit.bed_weights.  See docs/CONVENTIONS.md's
+// standards-basis note — the revision follows the implementation, not the document.
+//
+// Immersive `layout` values reference ITU-R BS.2051-3 / BS.775. ITU gives
 // the measurement method + layouts, not a consumer target — the regional targets (EBU −23, ATSC −24) all
 // sit on BS.1770.
 //

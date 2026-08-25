@@ -1,6 +1,6 @@
 % Inseglet — User Manual
 % A native REAPER extension exposing a Model Context Protocol interface
-% Version 1.13.1 · 2026
+% Version 1.13.2 · 2026
 
 ---
 
@@ -13,7 +13,7 @@ This manual covers installation, connecting a client, the concepts you need, a c
 server can do, worked examples, and troubleshooting. For the exhaustive, machine-generated schema of
 every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from the live registry).
 
-> This document is written for v1.13.1. Inseglet currently targets **macOS first**;
+> This document is written for v1.13.2. Inseglet currently targets **macOS first**;
 > Windows and Linux build in CI and follow once load-verified in a real REAPER.
 >
 > ⚠️ **Breaking in v1.11.0: `spatial.export_adm`, `spatial.export_damf` and
@@ -102,9 +102,21 @@ the platform extension binary and installs it into REAPER's `UserPlugins` folder
 
 ### Option B — ReaPack
 
-A ReaPack index is provided under `packaging/reapack/`. Once the repository is listed, you can import the
-index URL in ReaPack (Extensions → ReaPack → Import a repository) and install Inseglet like any other
-package. (Confirm the published index URL in the release notes.)
+A ReaPack index is provided under `packaging/reapack/`. Import it in ReaPack
+(Extensions → ReaPack → Import a repository) and install Inseglet like any other package. The index URL is
+
+```
+https://github.com/inseglet-audio/inseglet/raw/main/packaging/reapack/index.xml
+```
+
+> **macOS signing, stated plainly.** `reaper_mcp.dylib` is **ad-hoc codesigned** — the signature Apple
+> Silicon requires to load a binary at all — and it is **not notarized**, in common with other REAPER
+> extensions distributed this way. The published binary was checked on 2026-08-24 and carries no
+> quarantine attribute. If macOS does block it, clear the attribute and restart REAPER:
+>
+> ```
+> xattr -d com.apple.quarantine ~/Library/Application\ Support/REAPER/UserPlugins/reaper_mcp.dylib
+> ```
 
 After installing by either method, **restart REAPER** so it loads the extension.
 

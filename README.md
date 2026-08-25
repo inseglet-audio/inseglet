@@ -105,7 +105,8 @@ HTTP + SSE + JSON‑RPC 2.0, MCP `2025‑06‑18`), the main‑thread command pu
 `IReaperControlSurface` host **190 tools**, plus MCP resources and expert prompts. The extension compiles
 against the pinned REAPER SDK **and** an SDK‑free host core; the unit + protocol suite (`ctest -R unit`)
 drives the full request lifecycle and the elicitation round‑trip over real HTTP with no REAPER required.
-CI builds the macOS / Windows / Linux matrix on every push. **v1 targets macOS first**; Windows and Linux
+CI compiles and unit‑tests on Ubuntu on every push; the full macOS / Windows / Linux matrix runs on a
+version tag or a manual dispatch. **v1 targets macOS first**; Windows and Linux
 follow once load‑verified in a real REAPER (both already compile in CI). The integration test tier is
 currently a skeleton — see [`tests/README.md`](tests/README.md).
 

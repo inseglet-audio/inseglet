@@ -19,6 +19,28 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.13.2" author="James Livingston" time="2026-08-24T20:42:48Z">
+        <changelog><![CDATA[Documentation release: the standards basis now says WHICH loudness engine implements which
+revision of ITU-R BS.1770, and two public claims that were false are corrected. No functional change.
+
+`docs/CONVENTIONS.md` said "Standards basis throughout: ... ITU-R BS.1770-5". TWO loudness paths
+ship and they cite different revisions on purpose: REAPER's native RENDER_STATS program measure --
+`analysis.meter`'s program loudness and every deliverable-spec check -- is BS.1770-5, and the in-box
+C++ gated engine that measures stems, objects, the isolated dialog bus and folds that exist only in
+memory is BS.1770-4, pinned to it by unit test (Table 1's RLB numerator and Tables 4/5's channel
+weights). The word "throughout" was the only false statement. No engine changed and no measurement
+moves.
+
+`README.md` claimed CI builds the macOS / Windows / Linux matrix on every push. It does not: CI is
+Ubuntu-only on push, and the three-OS matrix runs on a version tag or a manual dispatch.
+
+`docs/MANUAL.md` hedged on the published ReaPack index URL. It now states it, and states the macOS
+signing posture plainly: the binary is ad-hoc codesigned -- the signature Apple Silicon requires to
+load it at all -- and is not notarized.
+
+Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 28, unmoved.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.13.2/reaper_mcp.dylib</source>
+      </version>
       <version name="1.13.1" author="James Livingston" time="2026-08-18T21:22:10Z">
         <changelog><![CDATA[Hygiene release: a user-facing warning no longer cites an internal engineering document.
 

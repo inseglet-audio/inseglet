@@ -6,6 +6,28 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.13.2] — 2026-08-24
+
+Documentation release. No functional change; the only source edit is a comment.
+
+The standards basis now says which loudness engine implements which revision of ITU-R BS.1770.
+Two paths ship and they cite different revisions on purpose: REAPER's native `RENDER_STATS`
+program measure — `analysis.meter`'s program loudness and every deliverable-spec check — follows
+**BS.1770-5**, while the in-box C++ gated engine, which measures stems, objects, the isolated
+dialog bus and folds that exist only in memory, implements **BS.1770-4** and is pinned to it by
+unit test. `docs/CONVENTIONS.md` had said "throughout", which was the only false statement.
+
+`README.md` claimed CI builds the three-OS matrix on every push. It does not: CI compiles and
+unit-tests on Ubuntu on every push, and the macOS / Windows / Linux matrix runs on a version tag
+or a manual dispatch.
+
+`docs/MANUAL.md` hedged on the published ReaPack index URL. It now states it, and states the
+macOS signing posture plainly: the shipped `reaper_mcp.dylib` is ad-hoc codesigned — the
+signature Apple Silicon requires to load it at all — and is not notarized.
+
+Surface 190 tools / 4 resources / 5 prompts — unmoved. Unit suite 28, unmoved.
+
+
 ## [1.13.1] — 2026-08-18
 
 Hygiene release: a user-facing warning no longer cites an internal engineering document.

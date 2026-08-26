@@ -9,6 +9,7 @@
 #include <string>
 
 #include "tool_helpers.h"
+#include "../adjust_report.h"   // the caller is told what was adjusted
 #include "../tool_registry.h"
 
 namespace reaper_mcp {
@@ -98,22 +99,30 @@ void registerItemTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "item":{"type":"integer","minimum":0},"position":{"type":"number","minimum":0}},
             "required":["track","item","position"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"position":{"type":"number"}},
-            "required":["ok","position"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"position":{"type":"number"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","position","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int tr = reqInt(a, "track"), im = reqInt(a, "item");
-            double v = reqNum(a, "position"); if (v < 0) v = 0;
+            double v = reqNum(a, "position");
+            const double asked = v;
+            if (v < 0) { v = 0; adj.note("position", asked, v, "negative, and an item cannot start before the timeline"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaItem* it = requireItem(tr, im);
             Undo_BeginBlock2(kCur);
             SetMediaItemInfo_Value(it, "D_POSITION", v);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: set item position", -1);
-            return Json{{"ok", true}, {"position", GetMediaItemInfo_Value(it, "D_POSITION")}};
+            const double actual = GetMediaItemInfo_Value(it, "D_POSITION");
+            if (actual != v) adj.reaper("position", v, actual);
+            return Json{{"ok", true}, {"position", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)tr; (void)im;
-            return Json{{"ok", true}, {"position", v}};
+            return Json{{"ok", true}, {"position", v},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 
@@ -123,22 +132,30 @@ void registerItemTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "item":{"type":"integer","minimum":0},"length":{"type":"number","minimum":0}},
             "required":["track","item","length"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"length":{"type":"number"}},
-            "required":["ok","length"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"length":{"type":"number"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","length","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int tr = reqInt(a, "track"), im = reqInt(a, "item");
-            double v = reqNum(a, "length"); if (v < 0) v = 0;
+            double v = reqNum(a, "length");
+            const double asked = v;
+            if (v < 0) { v = 0; adj.note("length", asked, v, "negative, and an item cannot be shorter than zero"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaItem* it = requireItem(tr, im);
             Undo_BeginBlock2(kCur);
             SetMediaItemInfo_Value(it, "D_LENGTH", v);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: set item length", -1);
-            return Json{{"ok", true}, {"length", GetMediaItemInfo_Value(it, "D_LENGTH")}};
+            const double actual = GetMediaItemInfo_Value(it, "D_LENGTH");
+            if (actual != v) adj.reaper("length", v, actual);
+            return Json{{"ok", true}, {"length", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)tr; (void)im;
-            return Json{{"ok", true}, {"length", v}};
+            return Json{{"ok", true}, {"length", v},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 
@@ -198,22 +215,30 @@ void registerItemTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "item":{"type":"integer","minimum":0},"length":{"type":"number","minimum":0}},
             "required":["track","item","length"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"length":{"type":"number"}},
-            "required":["ok","length"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"length":{"type":"number"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","length","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int tr = reqInt(a, "track"), im = reqInt(a, "item");
-            double v = reqNum(a, "length"); if (v < 0) v = 0;
+            double v = reqNum(a, "length");
+            const double asked = v;
+            if (v < 0) { v = 0; adj.note("length", asked, v, "negative, and a fade cannot be shorter than zero"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaItem* it = requireItem(tr, im);
             Undo_BeginBlock2(kCur);
             SetMediaItemInfo_Value(it, "D_FADEINLEN", v);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: set item fade-in", -1);
-            return Json{{"ok", true}, {"length", GetMediaItemInfo_Value(it, "D_FADEINLEN")}};
+            const double actual = GetMediaItemInfo_Value(it, "D_FADEINLEN");
+            if (actual != v) adj.reaper("length", v, actual);
+            return Json{{"ok", true}, {"length", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)tr; (void)im;
-            return Json{{"ok", true}, {"length", v}};
+            return Json{{"ok", true}, {"length", v},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 
@@ -223,22 +248,30 @@ void registerItemTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "item":{"type":"integer","minimum":0},"length":{"type":"number","minimum":0}},
             "required":["track","item","length"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"length":{"type":"number"}},
-            "required":["ok","length"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"length":{"type":"number"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","length","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int tr = reqInt(a, "track"), im = reqInt(a, "item");
-            double v = reqNum(a, "length"); if (v < 0) v = 0;
+            double v = reqNum(a, "length");
+            const double asked = v;
+            if (v < 0) { v = 0; adj.note("length", asked, v, "negative, and a fade cannot be shorter than zero"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaItem* it = requireItem(tr, im);
             Undo_BeginBlock2(kCur);
             SetMediaItemInfo_Value(it, "D_FADEOUTLEN", v);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: set item fade-out", -1);
-            return Json{{"ok", true}, {"length", GetMediaItemInfo_Value(it, "D_FADEOUTLEN")}};
+            const double actual = GetMediaItemInfo_Value(it, "D_FADEOUTLEN");
+            if (actual != v) adj.reaper("length", v, actual);
+            return Json{{"ok", true}, {"length", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)tr; (void)im;
-            return Json{{"ok", true}, {"length", v}};
+            return Json{{"ok", true}, {"length", v},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 
@@ -567,15 +600,18 @@ void registerItemTools(ToolRegistry& reg) {
             "item":{"type":"integer","minimum":0},"take":{"type":"integer","minimum":-1,"default":-1},
             "pan":{"type":"number","minimum":-1,"maximum":1}},
             "required":["track","item","pan"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"pan":{"type":"number"}},
-            "required":["ok","pan"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"pan":{"type":"number"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","pan","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int tr = reqInt(a, "track"), im = reqInt(a, "item");
             const int takeIdx = optInt(a, "take", -1);
             double pan = reqNum(a, "pan");
-            if (pan < -1.0) pan = -1.0;
-            if (pan > 1.0) pan = 1.0;
+            const double asked = pan;
+            if (pan < -1.0) { pan = -1.0; adj.note("pan", asked, pan, "below the minimum of -1 (hard left)"); }
+            if (pan > 1.0)  { pan = 1.0;  adj.note("pan", asked, pan, "above the maximum of +1 (hard right)"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaItem* it = requireItem(tr, im);
             MediaItem_Take* tk = requireTake(it, takeIdx);
@@ -583,10 +619,14 @@ void registerItemTools(ToolRegistry& reg) {
             SetMediaItemTakeInfo_Value(tk, "D_PAN", pan);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: set take pan", -1);
-            return Json{{"ok", true}, {"pan", GetMediaItemTakeInfo_Value(tk, "D_PAN")}};
+            const double actual = GetMediaItemTakeInfo_Value(tk, "D_PAN");
+            if (actual != pan) adj.reaper("pan", pan, actual);
+            return Json{{"ok", true}, {"pan", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)tr; (void)im; (void)takeIdx;
-            return Json{{"ok", true}, {"pan", pan}};
+            return Json{{"ok", true}, {"pan", pan},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 

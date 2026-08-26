@@ -33,6 +33,12 @@ add_executable(reaper_mcp_clamp_test unit/test_clamp_reporting.cpp)
 target_link_libraries(reaper_mcp_clamp_test PRIVATE reaper_mcp_hostcore)
 add_test(NAME unit.clamp_reporting COMMAND reaper_mcp_clamp_test)
 
+# --- Unit: the rest of the mutating surface must report what it adjusted ---
+# Separate binary from the clamp test above: that file is a statement about ONE tool.
+add_executable(reaper_mcp_adjust_test unit/test_adjust_reporting.cpp)
+target_link_libraries(reaper_mcp_adjust_test PRIVATE reaper_mcp_hostcore)
+add_test(NAME unit.adjust_reporting COMMAND reaper_mcp_adjust_test)
+
 # --- Unit: Phase-5a MCP prompt registry + expert-workflow templates (no REAPER) ---
 # Links the host core for registerExpertPrompts() and the json include path.
 add_executable(reaper_mcp_prompts_test unit/test_prompts.cpp)

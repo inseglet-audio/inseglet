@@ -1,20 +1,30 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.13.3
+@version 1.14.0
 @author James Livingston
 @link https://github.com/inseglet-audio/inseglet
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  A mutating tool now reports the input it silently adjusted.
+  Fourteen more tools say what they adjusted, and one had nothing to say.
 
-  `track.set_channels` clamps a request below 2 up to 2, clamps above 64 down to 64, and rounds an
-  odd count upward -- and it returned `{"ok": true, "channels": N}` with nothing naming any of it, so
-  a caller that trusted `ok` could not see that it had not been given what it asked for. It now
-  returns `clamped` and a `warnings` line naming what was asked and what was set, both declared in
-  its output schema. Nothing about the adjustment itself changed.
+  1.13.3 gave `track.set_channels` a `clamped` flag and a `warnings` line. Fourteen more mutating
+  tools carry it now, declared in each tool's output schema and listed as required.
 
-  The reporting shape is the one this binary already shipped elsewhere: `warnings` as the `spatial.*`
-  tools use it, `clamped` as the accessor tools declare it. Fifteen other mutating tools still adjust
-  their inputs silently and are unchanged here.
+  NINE INPUT CLAMPERS -- transport.set_playrate, track.set_rec_mon, track.set_rec_mode,
+  track.set_folder, item.set_position, item.set_length, item.set_fade_in, item.set_fade_out,
+  take.set_pan -- name what was ASKED and what was USED. The comparison is against the caller's own
+  value, never an intermediate, so a value adjusted twice reports the distance it travelled.
 
-  Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 28 -> 29, one added.
+  FIVE PER-NOTE PINS -- midi.apply_groove, humanize, nudge, quantize, stretch -- report a COUNT.
+  They do not adjust an input: the argument is honoured exactly and some notes still cannot land
+  where it implies, so they pin to the item start. "Requested X, used Y" would be false for these.
+
+  Nothing about any adjustment itself changed. This release changes what callers are TOLD, not what
+  REAPER is given. `required` grows on fourteen tools, which is why this is a minor bump.
+
+  spatial.set_source_position was examined and deliberately left alone: it was listed among the
+  silent adjusters and is not one -- the construct behind that listing is an FX-index lookup
+  fallback. The declared bounds are still not enforced; a tool tells you it clamped your value, it
+  does not refuse it.
+
+  Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 29 -> 30, one added.

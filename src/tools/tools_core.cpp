@@ -21,6 +21,7 @@
 
 #include "../reaper_api.h"     // no-op unless REAPER_MCP_HAVE_SDK
 #include "../tool_registry.h"
+#include "../adjust_report.h"      // the caller is told what was adjusted
 #include "../composite_support.h"  // makeError — structured, agent-actionable guards for the project verbs
 #include "../track_chunk.h"        // validateTrackChunk + diffTrackChunks (SDK-free)
 
@@ -191,18 +192,25 @@ void registerCoreTools(ToolRegistry& reg) {
         "transport.set_playrate", "Set the master play rate (0.25..4.0; 1.0 = normal speed).",
         jparse(R"({"type":"object","properties":{"rate":{"type":"number","minimum":0.25,"maximum":4}},
             "required":["rate"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"rate":{"type":"number"}},
-            "required":["ok","rate"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"rate":{"type":"number"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","rate","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             double rate = reqNum(a, "rate");
-            if (rate < 0.25) rate = 0.25;
-            if (rate > 4.0) rate = 4.0;
+            const double asked = rate;
+            if (rate < 0.25) { rate = 0.25; adj.note("rate", asked, rate, "below the minimum of 0.25"); }
+            if (rate > 4.0)  { rate = 4.0;  adj.note("rate", asked, rate, "above the maximum of 4.0"); }
 #ifdef REAPER_MCP_HAVE_SDK
             CSurf_OnPlayRateChange(rate);
-            return Json{{"ok", true}, {"rate", Master_GetPlayRate(kCur)}};
+            const double actual = Master_GetPlayRate(kCur);
+            if (actual != rate) adj.reaper("rate", rate, actual);
+            return Json{{"ok", true}, {"rate", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
-            return Json{{"ok", true}, {"rate", rate}};
+            return Json{{"ok", true}, {"rate", rate},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 
@@ -1046,23 +1054,30 @@ void registerCoreTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "mode":{"type":"integer","minimum":0,"maximum":2}},
             "required":["track","mode"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"mode":{"type":"integer"}},
-            "required":["ok","mode"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"mode":{"type":"integer"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","mode","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int idx = reqInt(a, "track");
             int m = reqInt(a, "mode");
-            if (m < 0) m = 0;
-            if (m > 2) m = 2;
+            const int asked = m;
+            if (m < 0) { m = 0; adj.note("mode", asked, m, "below the minimum of 0 (off)"); }
+            if (m > 2) { m = 2; adj.note("mode", asked, m, "above the maximum of 2 (auto)"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaTrack* t = requireTrack(idx);
             Undo_BeginBlock2(kCur);
             SetMediaTrackInfo_Value(t, "I_RECMON", (double)m);
             Undo_EndBlock2(kCur, "MCP: set track record-monitor", -1);
-            return Json{{"ok", true}, {"mode", (int)GetMediaTrackInfo_Value(t, "I_RECMON")}};
+            const int actual = (int)GetMediaTrackInfo_Value(t, "I_RECMON");
+            if (actual != m) adj.reaper("mode", m, actual);
+            return Json{{"ok", true}, {"mode", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)idx;
-            return Json{{"ok", true}, {"mode", m}};
+            return Json{{"ok", true}, {"mode", m},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 
@@ -1075,23 +1090,30 @@ void registerCoreTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "mode":{"type":"integer","minimum":0,"maximum":8}},
             "required":["track","mode"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"mode":{"type":"integer"}},
-            "required":["ok","mode"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"mode":{"type":"integer"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","mode","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int idx = reqInt(a, "track");
             int m = reqInt(a, "mode");
-            if (m < 0) m = 0;
-            if (m > 8) m = 8;
+            const int asked = m;
+            if (m < 0) { m = 0; adj.note("mode", asked, m, "below the minimum of 0 (input)"); }
+            if (m > 8) { m = 8; adj.note("mode", asked, m, "above the maximum of 8 (midi replace)"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaTrack* t = requireTrack(idx);
             Undo_BeginBlock2(kCur);
             SetMediaTrackInfo_Value(t, "I_RECMODE", (double)m);
             Undo_EndBlock2(kCur, "MCP: set track record mode", -1);
-            return Json{{"ok", true}, {"mode", (int)GetMediaTrackInfo_Value(t, "I_RECMODE")}};
+            const int actual = (int)GetMediaTrackInfo_Value(t, "I_RECMODE");
+            if (actual != m) adj.reaper("mode", m, actual);
+            return Json{{"ok", true}, {"mode", actual},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)idx;
-            return Json{{"ok", true}, {"mode", m}};
+            return Json{{"ok", true}, {"mode", m},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #endif
         }});
 
@@ -1104,15 +1126,21 @@ void registerCoreTools(ToolRegistry& reg) {
             "depth":{"type":"integer"},"compact":{"type":"integer","minimum":0,"maximum":2}},
             "required":["track","depth"],"additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"depth":{"type":"integer"},
-            "compact":{"type":"integer"}},"required":["ok","depth"]})"),
+            "compact":{"type":"integer"},"clamped":{"type":"boolean"},
+            "warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","depth","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Core,
         [](const Json& a) -> Json {
+            AdjustLog adj;
             const int idx = reqInt(a, "track");
             const int depth = reqInt(a, "depth");
             const bool hasCompact = a.contains("compact") && a["compact"].is_number();
             int compact = optInt(a, "compact", 0);
-            if (compact < 0) compact = 0;
-            if (compact > 2) compact = 2;
+            const int askedCompact = compact;
+            // Only an adjustment the CALLER can be surprised by is reported: an absent
+            // `compact` defaults to 0 and is not a clamp of anything they asked for.
+            if (compact < 0) { compact = 0; if (hasCompact) adj.note("compact", askedCompact, compact, "below the minimum of 0 (open)"); }
+            if (compact > 2) { compact = 2; if (hasCompact) adj.note("compact", askedCompact, compact, "above the maximum of 2 (closed)"); }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaTrack* t = requireTrack(idx);
             Undo_BeginBlock2(kCur);
@@ -1120,13 +1148,19 @@ void registerCoreTools(ToolRegistry& reg) {
             if (hasCompact) SetMediaTrackInfo_Value(t, "I_FOLDERCOMPACT", (double)compact);
             TrackList_AdjustWindows(false);
             Undo_EndBlock2(kCur, "MCP: set track folder", -1);
-            Json out{{"ok", true}, {"depth", (int)GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH")}};
+            const int actualDepth = (int)GetMediaTrackInfo_Value(t, "I_FOLDERDEPTH");
+            if (actualDepth != depth) adj.reaper("depth", depth, actualDepth);
+            Json out{{"ok", true}, {"depth", actualDepth}};
             out["compact"] = (int)GetMediaTrackInfo_Value(t, "I_FOLDERCOMPACT");
+            out["clamped"] = adj.any();
+            out["warnings"] = adj.warnings;
             return out;
 #else
             (void)idx;
             Json out{{"ok", true}, {"depth", depth}};
             if (hasCompact) out["compact"] = compact;
+            out["clamped"] = adj.any();
+            out["warnings"] = adj.warnings;
             return out;
 #endif
         }});

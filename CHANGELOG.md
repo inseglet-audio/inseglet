@@ -6,6 +6,38 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.14.0] — fourteen more tools say what they adjusted, and one had nothing to say (2026-08-26)
+
+### Added
+- **Fourteen mutating tools now report an adjustment they used to make silently**, in the shape
+  `track.set_channels` adopted in 1.13.3. Both fields are declared in each tool's output schema
+  and listed in its `required` array.
+  - **Nine input clampers** — `transport.set_playrate`, `track.set_rec_mon`, `track.set_rec_mode`,
+    `track.set_folder`, `item.set_position`, `item.set_length`, `item.set_fade_in`,
+    `item.set_fade_out`, `take.set_pan` — return **`clamped`** and a **`warnings`** line naming
+    what was **asked** and what was **used**. The comparison is always against the caller's own
+    value, never an intermediate, so a value adjusted twice reports the distance it travelled.
+  - **Five per-note pins** — `midi.apply_groove`, `midi.humanize`, `midi.nudge`, `midi.quantize`,
+    `midi.stretch` — report a **count**. These do not adjust an input: the argument is honoured
+    exactly and some notes still cannot land where it implies, so they pin to the item start.
+    Reporting them as *"requested X, used Y"* would be false.
+
+### Changed
+- Nothing about any adjustment itself. **This release changes what callers are told, not what
+  REAPER is given** — every value written through the SDK is the value 1.13.3 wrote.
+
+### Notes
+- ⚠️ **`required` grows on fourteen tools.** A lenient client is unaffected; a client that
+  validates results strictly will see two new required fields. That is why this is a **minor**
+  bump rather than a patch.
+- **`spatial.set_source_position` was examined and deliberately left alone.** It was listed among
+  the silent adjusters, and it is not one: the construct behind that listing is an FX-index
+  lookup fallback, not an input adjustment. Nothing is hidden from the caller and there is
+  nothing to repair.
+- The declared bounds on these tools are still **not enforced** — nothing in this server validates
+  a declared input schema. A tool now tells you it clamped your value; it does not refuse it.
+- Surface **190 tools / 4 resources / 5 prompts** — unmoved. `ctest` **29 → 30**.
+
 ## [1.13.3] — 2026-08-25
 
 A mutating tool now reports the input it silently adjusted.

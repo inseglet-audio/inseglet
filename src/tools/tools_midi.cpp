@@ -20,6 +20,7 @@
 #include "tool_helpers.h"
 #include "../tool_registry.h"
 #include "../groove.h"
+#include "../adjust_report.h"   // a per-note pin is reported, not hidden
 
 namespace reaper_mcp {
 
@@ -808,7 +809,9 @@ void registerMidiTools(ToolRegistry& reg) {
             "selectedOnly":{"type":"boolean","default":false}},
             "required":["track","item"],"additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"changed":{"type":"integer"},
-            "noteCount":{"type":"integer"}},"required":["ok","changed"]})"),
+            "noteCount":{"type":"integer"},"clamped":{"type":"boolean"},
+                "warnings":{"type":"array","items":{"type":"string"}}},
+                "required":["ok","changed","clamped","warnings"]})"),
         ToolAnnotations{false, false, false}, Profile::Midi,
         [](const Json& a) -> Json {
             const int trackIdx = reqInt(a, "track"), itemIdx = reqInt(a, "item");
@@ -825,11 +828,12 @@ void registerMidiTools(ToolRegistry& reg) {
             const double startQN = takeStartQN(tk);
             auto recs = readNoteRecs(tk, startQN);
             bool noSort = true; int changed = 0;
+                AdjustLog adj; int pinned = 0;
             Undo_BeginBlock2(kCur);
             for (auto& r : recs) {
                 if (selOnly && !r.sel) continue;
                 double ns = groove::quantizePos(r.sBeats, grid, strength, swing);
-                if (ns < 0.0) ns = 0.0;
+                if (ns < 0.0) { ns = 0.0; ++pinned; }
                 double ne;
                 if (qEnds) {
                     ne = groove::quantizePos(r.eBeats, grid, strength, swing);
@@ -845,12 +849,16 @@ void registerMidiTools(ToolRegistry& reg) {
             MIDI_Sort(tk);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: quantize MIDI", -1);
-            int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
-            return Json{{"ok", true}, {"changed", changed}, {"noteCount", nn}};
+            if (pinned > 0)
+                    adj.pinned(pinned, "note start", "0", "the quantised position fell before the item start");
+                int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
+            return Json{{"ok", true}, {"changed", changed}, {"noteCount", nn},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)trackIdx; (void)itemIdx; (void)takeIdx; (void)grid; (void)strength; (void)swing;
             (void)qEnds; (void)selOnly;
-            return Json{{"ok", true}, {"changed", 0}, {"noteCount", 0}};
+            return Json{{"ok", true}, {"changed", 0}, {"noteCount", 0},
+                        {"clamped", false}, {"warnings", Json::array()}};
 #endif
         }});
 
@@ -867,7 +875,9 @@ void registerMidiTools(ToolRegistry& reg) {
             "selectedOnly":{"type":"boolean","default":false}},
             "required":["track","item"],"additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"changed":{"type":"integer"},
-            "noteCount":{"type":"integer"}},"required":["ok","changed"]})"),
+            "noteCount":{"type":"integer"},"clamped":{"type":"boolean"},
+                "warnings":{"type":"array","items":{"type":"string"}}},
+                "required":["ok","changed","clamped","warnings"]})"),
         ToolAnnotations{false, false, false}, Profile::Midi,
         [](const Json& a) -> Json {
             const int trackIdx = reqInt(a, "track"), itemIdx = reqInt(a, "item");
@@ -884,11 +894,12 @@ void registerMidiTools(ToolRegistry& reg) {
             auto recs = readNoteRecs(tk, startQN);
             groove::Rng rng((uint64_t)seed);
             bool noSort = true; int changed = 0;
+                AdjustLog adj; int pinned = 0;
             Undo_BeginBlock2(kCur);
             for (auto& r : recs) {
                 if (selOnly && !r.sel) continue;
                 double ns = groove::humanizeTiming(r.sBeats, timing, rng);
-                if (ns < 0.0) ns = 0.0;
+                if (ns < 0.0) { ns = 0.0; ++pinned; }
                 double ne = ns + (r.eBeats - r.sBeats);
                 int nv = groove::humanizeVelocity(r.vel, vamt, rng, 1, 127);
                 writeNote(tk, startQN, r, ns, ne, nv, r.pitch, &noSort);
@@ -897,12 +908,16 @@ void registerMidiTools(ToolRegistry& reg) {
             MIDI_Sort(tk);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: humanize MIDI", -1);
-            int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
-            return Json{{"ok", true}, {"changed", changed}, {"noteCount", nn}};
+            if (pinned > 0)
+                    adj.pinned(pinned, "note start", "0", "the humanised position fell before the item start");
+                int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
+            return Json{{"ok", true}, {"changed", changed}, {"noteCount", nn},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)trackIdx; (void)itemIdx; (void)takeIdx; (void)timing; (void)vamt; (void)seed;
             (void)selOnly;
-            return Json{{"ok", true}, {"changed", 0}, {"noteCount", 0}};
+            return Json{{"ok", true}, {"changed", 0}, {"noteCount", 0},
+                        {"clamped", false}, {"warnings", Json::array()}};
 #endif
         }});
 
@@ -923,7 +938,9 @@ void registerMidiTools(ToolRegistry& reg) {
             "selectedOnly":{"type":"boolean","default":false}},
             "required":["track","item"],"additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"changed":{"type":"integer"},
-            "slots":{"type":"integer"},"noteCount":{"type":"integer"}},"required":["ok","changed"]})"),
+            "slots":{"type":"integer"},"noteCount":{"type":"integer"},"clamped":{"type":"boolean"},
+                "warnings":{"type":"array","items":{"type":"string"}}},
+                "required":["ok","changed","clamped","warnings"]})"),
         ToolAnnotations{false, false, false}, Profile::Midi,
         [](const Json& a) -> Json {
             const int trackIdx = reqInt(a, "track"), itemIdx = reqInt(a, "item");
@@ -956,12 +973,13 @@ void registerMidiTools(ToolRegistry& reg) {
             const double startQN = takeStartQN(tk);
             auto recs = readNoteRecs(tk, startQN);
             bool noSort = true; int changed = 0;
+                AdjustLog adj; int pinned = 0;
             Undo_BeginBlock2(kCur);
             for (auto& r : recs) {
                 if (selOnly && !r.sel) continue;
                 double nb; int nv;
                 groove::applyGroove(r.sBeats, r.vel, grid, tmpl, strength, nb, nv);
-                if (nb < 0.0) nb = 0.0;
+                if (nb < 0.0) { nb = 0.0; ++pinned; }
                 double ne = nb + (r.eBeats - r.sBeats);
                 writeNote(tk, startQN, r, nb, ne, nv, r.pitch, &noSort);
                 ++changed;
@@ -969,12 +987,16 @@ void registerMidiTools(ToolRegistry& reg) {
             MIDI_Sort(tk);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: apply groove", -1);
-            int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
+            if (pinned > 0)
+                    adj.pinned(pinned, "note start", "0", "the groove position fell before the item start");
+                int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
             return Json{{"ok", true}, {"changed", changed}, {"slots", (int)tmpl.size()},
-                        {"noteCount", nn}};
+                        {"noteCount", nn},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)trackIdx; (void)itemIdx; (void)takeIdx; (void)strength; (void)selOnly; (void)grid;
-            return Json{{"ok", true}, {"changed", 0}, {"slots", (int)tmpl.size()}, {"noteCount", 0}};
+            return Json{{"ok", true}, {"changed", 0}, {"slots", (int)tmpl.size()}, {"noteCount", 0},
+                        {"clamped", false}, {"warnings", Json::array()}};
 #endif
         }});
 
@@ -1184,7 +1206,9 @@ void registerMidiTools(ToolRegistry& reg) {
             "beats":{"type":"number"},"selectedOnly":{"type":"boolean","default":false}},
             "required":["track","item","beats"],"additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"moved":{"type":"integer"},
-            "noteCount":{"type":"integer"}},"required":["ok","moved"]})"),
+            "noteCount":{"type":"integer"},"clamped":{"type":"boolean"},
+                "warnings":{"type":"array","items":{"type":"string"}}},
+                "required":["ok","moved","clamped","warnings"]})"),
         ToolAnnotations{false, false, false}, Profile::Midi,
         [](const Json& a) -> Json {
             const int trackIdx = reqInt(a, "track"), itemIdx = reqInt(a, "item");
@@ -1198,11 +1222,12 @@ void registerMidiTools(ToolRegistry& reg) {
             const double startQN = takeStartQN(tk);
             auto recs = readNoteRecs(tk, startQN);
             bool noSort = true; int moved = 0;
+                AdjustLog adj; int pinned = 0;
             Undo_BeginBlock2(kCur);
             for (auto& r : recs) {
                 if (selOnly && !r.sel) continue;
                 double ns = r.sBeats + delta;
-                if (ns < 0.0) ns = 0.0;
+                if (ns < 0.0) { ns = 0.0; ++pinned; }
                 double ne = ns + (r.eBeats - r.sBeats);
                 writeNote(tk, startQN, r, ns, ne, r.vel, r.pitch, &noSort);
                 ++moved;
@@ -1210,11 +1235,15 @@ void registerMidiTools(ToolRegistry& reg) {
             MIDI_Sort(tk);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: nudge MIDI", -1);
-            int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
-            return Json{{"ok", true}, {"moved", moved}, {"noteCount", nn}};
+            if (pinned > 0)
+                    adj.pinned(pinned, "note start", "0", "the requested shift would have placed them before the item start");
+                int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
+            return Json{{"ok", true}, {"moved", moved}, {"noteCount", nn},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)trackIdx; (void)itemIdx; (void)takeIdx; (void)delta; (void)selOnly;
-            return Json{{"ok", true}, {"moved", 0}, {"noteCount", 0}};
+            return Json{{"ok", true}, {"moved", 0}, {"noteCount", 0},
+                        {"clamped", false}, {"warnings", Json::array()}};
 #endif
         }});
 
@@ -1231,7 +1260,9 @@ void registerMidiTools(ToolRegistry& reg) {
             "selectedOnly":{"type":"boolean","default":false}},
             "required":["track","item","factor"],"additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"changed":{"type":"integer"},
-            "noteCount":{"type":"integer"}},"required":["ok","changed"]})"),
+            "noteCount":{"type":"integer"},"clamped":{"type":"boolean"},
+                "warnings":{"type":"array","items":{"type":"string"}}},
+                "required":["ok","changed","clamped","warnings"]})"),
         ToolAnnotations{false, false, false}, Profile::Midi,
         [](const Json& a) -> Json {
             const int trackIdx = reqInt(a, "track"), itemIdx = reqInt(a, "item");
@@ -1247,11 +1278,12 @@ void registerMidiTools(ToolRegistry& reg) {
             const double startQN = takeStartQN(tk);
             auto recs = readNoteRecs(tk, startQN);
             bool noSort = true; int changed = 0;
+                AdjustLog adj; int pinned = 0;
             Undo_BeginBlock2(kCur);
             for (auto& r : recs) {
                 if (selOnly && !r.sel) continue;
                 double ns = groove::stretchPos(r.sBeats, anchor, factor);
-                if (ns < 0.0) ns = 0.0;
+                if (ns < 0.0) { ns = 0.0; ++pinned; }
                 double ne = ns + (r.eBeats - r.sBeats) * factor;
                 writeNote(tk, startQN, r, ns, ne, r.vel, r.pitch, &noSort);
                 ++changed;
@@ -1259,11 +1291,15 @@ void registerMidiTools(ToolRegistry& reg) {
             MIDI_Sort(tk);
             UpdateArrange();
             Undo_EndBlock2(kCur, "MCP: stretch MIDI", -1);
-            int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
-            return Json{{"ok", true}, {"changed", changed}, {"noteCount", nn}};
+            if (pinned > 0)
+                    adj.pinned(pinned, "note start", "0", "the stretched position fell before the item start");
+                int nn = 0, cc = 0, sx = 0; MIDI_CountEvts(tk, &nn, &cc, &sx);
+            return Json{{"ok", true}, {"changed", changed}, {"noteCount", nn},
+                        {"clamped", adj.any()}, {"warnings", adj.warnings}};
 #else
             (void)trackIdx; (void)itemIdx; (void)takeIdx; (void)factor; (void)anchor; (void)selOnly;
-            return Json{{"ok", true}, {"changed", 0}, {"noteCount", 0}};
+            return Json{{"ok", true}, {"changed", 0}, {"noteCount", 0},
+                        {"clamped", false}, {"warnings", Json::array()}};
 #endif
         }});
 }

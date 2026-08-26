@@ -1,26 +1,20 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.13.2
+@version 1.13.3
 @author James Livingston
 @link https://github.com/inseglet-audio/inseglet
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  Documentation release: the standards basis now says WHICH loudness engine implements which
-  revision of ITU-R BS.1770, and two public claims that were false are corrected. No functional change.
+  A mutating tool now reports the input it silently adjusted.
 
-  `docs/CONVENTIONS.md` said "Standards basis throughout: ... ITU-R BS.1770-5". TWO loudness paths
-  ship and they cite different revisions on purpose: REAPER's native RENDER_STATS program measure --
-  `analysis.meter`'s program loudness and every deliverable-spec check -- is BS.1770-5, and the in-box
-  C++ gated engine that measures stems, objects, the isolated dialog bus and folds that exist only in
-  memory is BS.1770-4, pinned to it by unit test (Table 1's RLB numerator and Tables 4/5's channel
-  weights). The word "throughout" was the only false statement. No engine changed and no measurement
-  moves.
+  `track.set_channels` clamps a request below 2 up to 2, clamps above 64 down to 64, and rounds an
+  odd count upward -- and it returned `{"ok": true, "channels": N}` with nothing naming any of it, so
+  a caller that trusted `ok` could not see that it had not been given what it asked for. It now
+  returns `clamped` and a `warnings` line naming what was asked and what was set, both declared in
+  its output schema. Nothing about the adjustment itself changed.
 
-  `README.md` claimed CI builds the macOS / Windows / Linux matrix on every push. It does not: CI is
-  Ubuntu-only on push, and the three-OS matrix runs on a version tag or a manual dispatch.
+  The reporting shape is the one this binary already shipped elsewhere: `warnings` as the `spatial.*`
+  tools use it, `clamped` as the accessor tools declare it. Fifteen other mutating tools still adjust
+  their inputs silently and are unchanged here.
 
-  `docs/MANUAL.md` hedged on the published ReaPack index URL. It now states it, and states the macOS
-  signing posture plainly: the binary is ad-hoc codesigned -- the signature Apple Silicon requires to
-  load it at all -- and is not notarized.
-
-  Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 28, unmoved.
+  Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 28 -> 29, one added.

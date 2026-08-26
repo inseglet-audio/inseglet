@@ -223,6 +223,18 @@ DSP; `decode_coverage` adds a virtual-speaker decode to `ambisonic_meter.h`. All
   (formatted via `TrackFX_FormatParamValueNormalized` — REAPER exposes IEM/JUCE angles as normalized
   `[0,1]`, §3), and is `null` when no positional panner is present. An optional `bed:` renders the bed
   bus for a **level reference** (`bedVsObjects = bedLUFS − loudestObjectLUFS`) — a comparison, not a sum.
+  - ⛔ **CORRECTION, ADDITIVE — the sentence above is left standing.** *"(mono objects weigh
+    1.0)"* **describes a rule the shipped code does not implement.** Measured live: an object
+    track carrying energy in `Ls` reads **−21.51 LKFS** where the identical tone in `L` reads **−23.00**
+    — Δ **+1.49 LU**, the BS.1770 `Ls` weight (Table 3, page 7: **1.41**, +1.5 dB). ⇒ **objects are
+    measured with the ordinary BS.1770 channel weights of the rendered stem, at whatever channel layout
+    the object TRACK has; they are not measured at unit weight.** `position` reads `null` on those
+    fixtures and no panner is installed, so **the weight is not position-derived** — it follows from the
+    channel layout alone. ⚠️ **The unit-weight description is nearly right for a genuinely MONO object
+    and wrong for a multichannel one — and for the mono case a REAPER track cannot be 1 channel
+    (`track.set_channels(1)` returns 2, and since 1.13.3 says so in a `warnings` line), so a 1-channel
+    source plays out of both and the reading is **3.01 LU high**.** ⛔ **No source change: the engine stays pinned to
+    BS.1770-4 by test.**
 - **Binaural QC (`analysis.binaural_check`).** A 2-channel binaural monitor bus (§ Phase-4
   `spatial.add_binaural_monitor`) or stereo binaural render is measured measure-don't-limit (`RENDER_STATS`
   program loudness/true-peak on a headroomed bus ⇒ bit-exact samples). Beyond program loudness it reports

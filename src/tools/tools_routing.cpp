@@ -8,6 +8,7 @@
 // single-undo.
 
 #include <string>
+#include <vector>
 
 #include "tool_helpers.h"
 #include "../tool_registry.h"
@@ -33,24 +34,48 @@ void registerRoutingTools(ToolRegistry& reg) {
         jparse(R"({"type":"object","properties":{"track":{"type":"integer","minimum":0},
             "channels":{"type":"integer","minimum":2,"maximum":64}},
             "required":["track","channels"],"additionalProperties":false})"),
-        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"channels":{"type":"integer"}},
-            "required":["ok","channels"]})"),
+        jparse(R"({"type":"object","properties":{"ok":{"type":"boolean"},"channels":{"type":"integer"},
+            "clamped":{"type":"boolean"},"warnings":{"type":"array","items":{"type":"string"}}},
+            "required":["ok","channels","clamped","warnings"]})"),
         ToolAnnotations{false, false, true}, Profile::Routing,
         [](const Json& a) -> Json {
             const int idx = reqInt(a, "track");
-            int ch = reqInt(a, "channels");
-            if (ch < 2) ch = 2;
-            if (ch > 64) ch = 64;
-            if (ch & 1) ++ch;  // REAPER track channel counts are even
+            const int asked = reqInt(a, "channels");
+            // The adjustment below is exactly what it always was; what is new is that the
+            // caller is TOLD.  A caller that trusted `ok` could not see that it had not been
+            // given what it asked for -- and the declared minimum/maximum do not help,
+            // because nothing in this server validates a declared inputSchema.
+            // The reporting shape is the one this binary already ships: `warnings` as the
+            // spatial.* tools use it, `clamped` as the accessor tools declare it.
+            int ch = asked;
+            const char* why = nullptr;
+            if (ch < 2)  { ch = 2;  why = "below the minimum of 2"; }
+            if (ch > 64) { ch = 64; why = "above this tool's maximum of 64"; }
+            if (ch & 1)  { ++ch; if (!why) why = "odd, and REAPER track channel counts are even"; }
+
+            std::vector<std::string> warnings;
+            if (ch != asked) {
+                std::string w = "requested " + std::to_string(asked) + " channels, set " +
+                                std::to_string(ch) + " \xe2\x80\x94 " + why + ".";
+                if (asked > 64)
+                    w += "  This tool caps at 64; `spatial.set_track_channels` accepts up to 128.";
+                warnings.push_back(std::move(w));
+            }
 #ifdef REAPER_MCP_HAVE_SDK
             MediaTrack* t = requireTrack(idx);
             Undo_BeginBlock2(kCur);
             SetMediaTrackInfo_Value(t, "I_NCHAN", (double)ch);
             Undo_EndBlock2(kCur, "MCP: set track channel count", -1);
-            return Json{{"ok", true}, {"channels", (int)GetMediaTrackInfo_Value(t, "I_NCHAN")}};
+            const int actual = (int)GetMediaTrackInfo_Value(t, "I_NCHAN");
+            if (actual != ch)
+                warnings.push_back("REAPER reports " + std::to_string(actual) +
+                                   " channels where " + std::to_string(ch) + " was written.");
+            return Json{{"ok", true}, {"channels", actual},
+                        {"clamped", actual != asked}, {"warnings", warnings}};
 #else
             (void)idx;
-            return Json{{"ok", true}, {"channels", ch}};
+            return Json{{"ok", true}, {"channels", ch},
+                        {"clamped", ch != asked}, {"warnings", warnings}};
 #endif
         }});
 

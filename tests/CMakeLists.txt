@@ -27,6 +27,12 @@ add_executable(reaper_mcp_protocol_test unit/test_mcp_server.cpp)
 target_link_libraries(reaper_mcp_protocol_test PRIVATE reaper_mcp_hostcore)
 add_test(NAME unit.mcp_protocol COMMAND reaper_mcp_protocol_test)
 
+# --- Unit: a mutating tool must REPORT the input it silently adjusted ---
+# Links the host core so the tool body runs on its SDK-free path; needs no REAPER.
+add_executable(reaper_mcp_clamp_test unit/test_clamp_reporting.cpp)
+target_link_libraries(reaper_mcp_clamp_test PRIVATE reaper_mcp_hostcore)
+add_test(NAME unit.clamp_reporting COMMAND reaper_mcp_clamp_test)
+
 # --- Unit: Phase-5a MCP prompt registry + expert-workflow templates (no REAPER) ---
 # Links the host core for registerExpertPrompts() and the json include path.
 add_executable(reaper_mcp_prompts_test unit/test_prompts.cpp)

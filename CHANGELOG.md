@@ -6,6 +6,30 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.13.3] — 2026-08-25
+
+A mutating tool now reports the input it silently adjusted.
+
+`track.set_channels` adjusts a request three ways: it clamps a count below 2 up to 2, clamps one
+above 64 down to 64, and rounds an odd count upward, because REAPER track channel counts are even.
+It did all of that while returning `{"ok": true, "channels": N}` with nothing naming the
+adjustment, so a caller that trusted `ok` could not see it had not been given what it asked for.
+
+It now returns **`clamped`** and a **`warnings`** line naming what was asked and what was set, both
+declared in the tool's output schema. **The adjustment itself is unchanged** — only the reporting
+is new, so existing callers that read `channels` see exactly what they saw before.
+
+The shape is the one already shipping elsewhere in this binary: `warnings` as the `spatial.*` tools
+use it, `clamped` as the accessor tools declare it.
+
+The warning also names a divergence that was previously undiscoverable from the result: this tool
+caps at 64, while `spatial.set_track_channels` accepts up to 128 on the same underlying property.
+
+Other mutating tools still adjust their inputs without reporting it; they are unchanged here.
+
+Surface 190 tools / 4 resources / 5 prompts — unmoved. Unit suite 28 → 29.
+
+
 ## [1.13.2] — 2026-08-24
 
 Documentation release. No functional change; the only source edit is a comment.

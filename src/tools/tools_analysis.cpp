@@ -3314,6 +3314,132 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"interpretation", topInterp}, {"warnings", warnings}};
         }});
 
+    // ---- analysis.revive_and_meter — the MUTATING sibling of analysis.meter -----------------
+    // ⛔ WHY THIS IS A SEPARATE TOOL AND NOT A FLAG ON analysis.meter.
+    //   MCP tool annotations are STATIC PER TOOL.  A `revive:true` parameter cannot honestly flip
+    //   `readOnly`, so a meter that sometimes mutates would be a tool whose annotation is a lie for
+    //   the calls that matter.  analysis.meter therefore keeps `readOnly: true` and keeps its
+    //   refusal, UNTOUCHED, and the permission to mutate lives here where a client can refuse it by
+    //   annotation alone.
+    // ⛔ IT REUSES analysis.meter's HANDLER BY REGISTRY LOOKUP AND RE-IMPLEMENTS NOTHING.  A second
+    //   implementation of the silence read would be two extractors whose
+    //   difference gets reported as a defect in the subject.
+    // ⚠️ THE REGISTRY POINTER IS SAFE BECAUSE THE HANDLER LIVES INSIDE THE REGISTRY IT POINTS AT --
+    //   they cannot outlive each other.
+    {
+        ToolRegistry* R = &reg;
+        reg.add(Tool{
+        "analysis.revive_and_meter",
+        "analysis.meter, plus permission to REVIVE a dead render path and read again. Runs the "
+        "meter; if it refuses with render_silent_unconfirmed (the render is digital silence while a "
+        "render-free accessor read of the same track finds content), this tool runs the revive "
+        "action (default 40101, revalidate project sources) and meters a SECOND time, returning BOTH "
+        "readings. Unlike analysis.meter it is NOT read-only: it changes project state and it says so "
+        "in the payload. It does NOT restore that state -- source revalidation is not a snapshotted "
+        "project field, so the restore pattern analysis.meter uses for RENDER_* settings does not "
+        "reach it; `revive.restored` reports false and names why. If the meter does not refuse, "
+        "NOTHING is run and `revive.attempted` is false.",
+        jparse(R"({"type":"object","properties":{
+            "target":{"type":["integer","string"]},
+            "boundsFlag":{"type":"integer","minimum":0,"maximum":7,"default":1},
+            "startPos":{"type":"number"},"endPos":{"type":"number"},
+            "renderAction":{"type":"integer","default":41824},
+            "reviveAction":{"type":"integer","default":40101},
+            "allowSilent":{"type":"boolean","default":false},
+            "dryRun":{"type":"boolean","default":false}},
+            "additionalProperties":false})"),
+        jparse(R"({"type":"object","properties":{
+            "target":{"type":"string"},"channels":{"type":"integer"},"layout":{"type":"string"},
+            "program":{"type":"object"},"channelsDetail":{"type":"array"},
+            "downmix":{"type":"object"},"measuredSource":{"type":"string"},
+            "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
+            "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
+            "revive":{"type":"object"},"beforeRevive":{"type":"object"},
+            "plan":{"type":"string"},"dryRun":{"type":"boolean"},
+            "error":{"type":"string"},"detail":{"type":"string"},"remediation":{"type":"string"},
+            "warnings":{"type":"array"}}})"),
+        ToolAnnotations{/*readOnly*/ false, /*destructive*/ false, /*idempotent*/ false},
+        Profile::Analysis,
+        [R](const Json& a) -> Json {
+            const int reviveAction = optInt(a, "reviveAction", 40101);
+            const bool dryRun      = optBool(a, "dryRun", false);
+
+            // Pass EXACTLY analysis.meter's own parameters through -- never our own extras.
+            Json m = Json::object();
+            for (const char* k : {"target","boundsFlag","startPos","endPos","renderAction",
+                                  "allowSilent","dryRun"})
+                if (a.contains(k)) m[k] = a[k];
+
+            const Tool* meter = R ? R->find("analysis.meter") : nullptr;
+            if (!meter || !meter->handler)
+                return makeError("meter_unavailable",
+                                 "analysis.meter is not registered in this session, so there is no "
+                                 "reading to revive and nothing was run",
+                                 "enable the Analysis profile and retry");
+
+            if (dryRun)
+                return Json{{"dryRun", true},
+                            {"plan", "run analysis.meter; if it refuses with "
+                                     "render_silent_unconfirmed, run action " +
+                                     std::to_string(reviveAction) + " and meter again"},
+                            {"revive", Json{{"attempted", false},
+                                            {"action", reviveAction},
+                                            {"reason", "dryRun: nothing was run and nothing was "
+                                                       "changed"}}}};
+
+            Json first = meter->handler(m);
+            const bool refused = first.is_object() && first.contains("error") &&
+                                 first["error"].is_string() &&
+                                 first["error"].get<std::string>() == "render_silent_unconfirmed";
+
+            // ⛔ THE CONTROL THAT MATTERS IS THIS BRANCH: when the meter did NOT refuse, this tool
+            //   must NOT claim a revive it never performed.  A tool that reports `attempted: true`
+            //   on every call is a tool whose revive field carries no information.
+            if (!refused) {
+                Json out = first;
+                if (out.is_object())
+                    out["revive"] = Json{{"attempted", false},
+                                         {"action", reviveAction},
+                                         {"refusedBefore", false},
+                                         {"restored", true},
+                                         {"reason", "analysis.meter did not refuse, so there was "
+                                                    "nothing to revive and NO action was run; "
+                                                    "project state is unchanged by this call"}};
+                return out;
+            }
+
+#ifdef REAPER_MCP_HAVE_SDK
+            Main_OnCommand(reviveAction, 0);
+#endif
+            Json second = meter->handler(m);
+            const bool stillRefused = second.is_object() && second.contains("error") &&
+                                      second["error"].is_string() &&
+                                      second["error"].get<std::string>() ==
+                                          "render_silent_unconfirmed";
+
+            Json out = second.is_object() ? second : Json::object();
+            out["beforeRevive"] = first;
+            out["revive"] = Json{
+                {"attempted", true},
+                {"action", reviveAction},
+                {"refusedBefore", true},
+                {"refusedAfter", stillRefused},
+                {"restored", false},
+                {"restoreNote",
+                 "project state WAS changed and was NOT changed back. Source revalidation is not a "
+                 "snapshotted project field, so the RENDER_* snapshot/restore pattern analysis.meter "
+                 "uses does not reach it. This tool reports the mutation rather than concealing it; "
+                 "that is why it is annotated readOnly:false and why analysis.meter, which restores "
+                 "everything it touches, is not."},
+                {"note", stillRefused
+                             ? "the revive did NOT clear the disagreement -- both read paths still "
+                               "disagree, so this is not a dead render path that revalidation fixes"
+                             : "the revive cleared the disagreement: the second meter reading "
+                               "reports rather than refusing"}};
+            return out;
+        }});
+    }
+
     // ---- analysis.verify_routing — B4 channel-identity QC, read-only half --------------
     reg.add(Tool{
         "analysis.verify_routing",

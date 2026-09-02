@@ -6,6 +6,38 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.15.0] — a meter that could only refuse now has a sibling that may act (2026-09-02)
+
+### Added
+- **`analysis.revive_and_meter`** — a mutating sibling of `analysis.meter`.
+  `analysis.meter` refuses to report a level when its two read paths disagree: the render comes
+  back as digital silence while a render-free accessor read of the same track finds content. That
+  refusal names the disagreement and points you at REAPER's own *revalidate project sources*
+  action. It is correct, and it is **unchanged in this release, byte for byte**.
+  What it could not do is act. This tool may: it runs the revive action, meters a **second** time,
+  and returns **both** readings.
+  - **It is a separate tool rather than a flag, and that is the point.** MCP tool annotations are
+    **static per tool**. A `revive: true` parameter would make `analysis.meter` a tool whose
+    `readOnly: true` annotation is false on exactly the calls that matter, and a client that
+    declines mutating tools **by annotation alone** would have no way to tell. So `analysis.meter`
+    keeps `readOnly: true`, and the permission to mutate lives in a tool your client can refuse
+    without reading a single argument.
+  - **It reuses `analysis.meter`'s handler rather than re-implementing the silence read**, so the
+    two tools cannot drift apart in what they measure.
+  - **It does not claim a repair it cannot observe.** `revive.restored` reports **`false`**, with a
+    reason: source revalidation is not a snapshotted project field, so the restore pattern
+    `analysis.meter` uses for `RENDER_*` settings does not reach it.
+  - If the meter does **not** refuse, nothing is run and `revive.attempted` is `false`.
+
+### Changed
+- `analysis.meter` — **nothing.** Its annotation, its guard and its refusal text are untouched.
+
+### Notes
+- Surface **190 → 191 tools** / 4 resources / 5 prompts — the first tool added since 1.12.0, and
+  the reason this is a **minor** release.
+- ⚠️ **This tool changes project state.** It is annotated `readOnly: false`, and a client
+  configured to confirm before mutating tools will — correctly — ask before running it.
+
 ## [1.14.0] — fourteen more tools say what they adjusted, and one had nothing to say (2026-08-26)
 
 ### Added

@@ -1,30 +1,31 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.14.0
+@version 1.15.0
 @author James Livingston
 @link https://github.com/inseglet-audio/inseglet
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  Fourteen more tools say what they adjusted, and one had nothing to say.
+  A meter that can only read a dead source now has a sibling that may revive it.
 
-  1.13.3 gave `track.set_channels` a `clamped` flag and a `warnings` line. Fourteen more mutating
-  tools carry it now, declared in each tool's output schema and listed as required.
+  `analysis.meter` refuses to report a silence its two read paths disagree about: when the audio
+  accessor returns an empty window while the source is online, it reports the disagreement instead
+  of a level, and tells you to run REAPER's own "rebuild peaks" action. That refusal is correct and
+  it is unchanged in this release, byte for byte.
 
-  NINE INPUT CLAMPERS -- transport.set_playrate, track.set_rec_mon, track.set_rec_mode,
-  track.set_folder, item.set_position, item.set_length, item.set_fade_in, item.set_fade_out,
-  take.set_pan -- name what was ASKED and what was USED. The comparison is against the caller's own
-  value, never an intermediate, so a value adjusted twice reports the distance it travelled.
+  What it could not do is act. `analysis.revive_and_meter` is a SEPARATE tool that may: it revives
+  the dead read path and reads again, then reports the meter it got.
 
-  FIVE PER-NOTE PINS -- midi.apply_groove, humanize, nudge, quantize, stretch -- report a COUNT.
-  They do not adjust an input: the argument is honoured exactly and some notes still cannot land
-  where it implies, so they pin to the item start. "Requested X, used Y" would be false for these.
+  WHY A SEPARATE TOOL AND NOT A FLAG. MCP tool annotations are static per tool. A `revive: true`
+  parameter would make `analysis.meter` a tool whose `readOnly: true` annotation is a lie on exactly
+  the calls that matter -- and a client that refuses mutating tools by annotation alone would be
+  given no way to tell. So `analysis.meter` keeps `readOnly: true` AND keeps its refusal, and the
+  permission to mutate lives in a tool your client can decline without reading a single argument.
 
-  Nothing about any adjustment itself changed. This release changes what callers are TOLD, not what
-  REAPER is given. `required` grows on fourteen tools, which is why this is a minor bump.
+  It reuses `analysis.meter`'s handler by registry lookup and re-implements nothing, so the two
+  tools cannot drift apart in what they measure.
 
-  spatial.set_source_position was examined and deliberately left alone: it was listed among the
-  silent adjusters and is not one -- the construct behind that listing is an FX-index lookup
-  fallback. The declared bounds are still not enforced; a tool tells you it clamped your value, it
-  does not refuse it.
+  It does not pretend to restore. `revive.restored` reports `false` with a reason: source
+  revalidation is not a snapshotted project field, so the tool declines to claim a repair it cannot
+  observe.
 
-  Surface 190 tools / 4 resources / 5 prompts -- UNMOVED. ctest 29 -> 30, one added.
+  Surface 191 tools / 4 resources / 5 prompts -- the first tool added since 1.12.0.

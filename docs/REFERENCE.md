@@ -1,9 +1,9 @@
 # REAPER MCP — Tool, Resource & Prompt Reference
 
-> **Generated** 2026-08-17 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
+> **Generated** 2026-09-02 from the live in-process registry (`docs/gen/dump_reference.cpp` linked against `reaper_mcp_hostcore`). This mirrors exactly what the server serves over `tools/list`, `resources/list`, and `prompts/list` — it is not hand-maintained. Regenerate after any surface change with `cmake --build build --target reference-doc`.
 
 
-**Protocol:** MCP `2025-06-18` · **Surface:** 190 tools · 4 resources · 5 prompts.
+**Protocol:** MCP `2025-06-18` · **Surface:** 191 tools · 4 resources · 5 prompts.
 
 
 Tools are grouped by capability **profile**. Clients may negotiate a bounded profile set at `initialize` (to stay under LLM tool-count caps); `Profile::Full` (the default) exposes every tool. The always-on `tools.enumerate` meta-tool is visible under any profile.
@@ -18,9 +18,9 @@ Tools are grouped by capability **profile**. Clients may negotiate a bounded pro
 | **Routing** (`routing`) | 8 | Track-to-track sends and channel-count management. |
 | **MIDI** (`midi`) | 23 | Takes and MIDI note / CC CRUD. |
 | **Render** (`render`) | 5 | Multichannel / immersive deliverable rendering. |
-| **Analysis** (`analysis`) | 19 | Deliverable-spec conformance (loudness + true-peak, per-bed). |
+| **Analysis** (`analysis`) | 20 | Deliverable-spec conformance (loudness + true-peak, per-bed). |
 | **Composite / DSL** (`full`) | 1 | The deterministic composite macro-DSL runner (`$ref`/capture, atomic single-undo). |
-| **Total** | **190** | |
+| **Total** | **191** | |
 
 ## Contents
 
@@ -875,7 +875,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `length`, `ok`.
+Returns a structured object with: `clamped`, `length`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -906,16 +906,27 @@ Returns a structured object with: `length`, `ok`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "length": {
         "type": "number"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "length"
+      "length",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -941,7 +952,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `length`, `ok`.
+Returns a structured object with: `clamped`, `length`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -972,16 +983,27 @@ Returns a structured object with: `length`, `ok`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "length": {
         "type": "number"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "length"
+      "length",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -1007,7 +1029,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `length`, `ok`.
+Returns a structured object with: `clamped`, `length`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -1038,16 +1060,27 @@ Returns a structured object with: `length`, `ok`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "length": {
         "type": "number"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "length"
+      "length",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -1138,7 +1171,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `ok`, `position`.
+Returns a structured object with: `clamped`, `ok`, `position`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -1169,16 +1202,27 @@ Returns a structured object with: `ok`, `position`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "ok": {
         "type": "boolean"
       },
       "position": {
         "type": "number"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "position"
+      "position",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -2602,7 +2646,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `ok`, `pan`.
+Returns a structured object with: `clamped`, `ok`, `pan`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -2639,16 +2683,27 @@ Returns a structured object with: `ok`, `pan`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "ok": {
         "type": "boolean"
       },
       "pan": {
         "type": "number"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "pan"
+      "pan",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -4344,7 +4399,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `compact`, `depth`, `ok`.
+Returns a structured object with: `clamped`, `compact`, `depth`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -4374,6 +4429,9 @@ Returns a structured object with: `compact`, `depth`, `ok`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "compact": {
         "type": "integer"
       },
@@ -4382,11 +4440,19 @@ Returns a structured object with: `compact`, `depth`, `ok`.
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "depth"
+      "depth",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -4706,7 +4772,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `mode`, `ok`.
+Returns a structured object with: `clamped`, `mode`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -4733,16 +4799,27 @@ Returns a structured object with: `mode`, `ok`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "mode": {
         "type": "integer"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "mode"
+      "mode",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -4767,7 +4844,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `mode`, `ok`.
+Returns a structured object with: `clamped`, `mode`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -4794,16 +4871,27 @@ Returns a structured object with: `mode`, `ok`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "mode": {
         "type": "integer"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "mode"
+      "mode",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -5283,7 +5371,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `ok`, `rate`.
+Returns a structured object with: `clamped`, `ok`, `rate`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -5305,16 +5393,27 @@ Returns a structured object with: `ok`, `rate`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "ok": {
         "type": "boolean"
       },
       "rate": {
         "type": "number"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "rate"
+      "rate",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -10907,7 +11006,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `channels`, `ok`.
+Returns a structured object with: `channels`, `clamped`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -10937,13 +11036,24 @@ Returns a structured object with: `channels`, `ok`.
       "channels": {
         "type": "integer"
       },
+      "clamped": {
+        "type": "boolean"
+      },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "channels"
+      "channels",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -10979,7 +11089,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `changed`, `noteCount`, `ok`, `slots`.
+Returns a structured object with: `changed`, `clamped`, `noteCount`, `ok`, `slots`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -11055,6 +11165,9 @@ Returns a structured object with: `changed`, `noteCount`, `ok`, `slots`.
       "changed": {
         "type": "integer"
       },
+      "clamped": {
+        "type": "boolean"
+      },
       "noteCount": {
         "type": "integer"
       },
@@ -11063,11 +11176,19 @@ Returns a structured object with: `changed`, `noteCount`, `ok`, `slots`.
       },
       "slots": {
         "type": "integer"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "changed"
+      "changed",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -11441,7 +11562,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `changed`, `noteCount`, `ok`.
+Returns a structured object with: `changed`, `clamped`, `noteCount`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -11494,16 +11615,27 @@ Returns a structured object with: `changed`, `noteCount`, `ok`.
       "changed": {
         "type": "integer"
       },
+      "clamped": {
+        "type": "boolean"
+      },
       "noteCount": {
         "type": "integer"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "changed"
+      "changed",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -12195,7 +12327,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `moved`, `noteCount`, `ok`.
+Returns a structured object with: `clamped`, `moved`, `noteCount`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -12234,6 +12366,9 @@ Returns a structured object with: `moved`, `noteCount`, `ok`.
   },
   "outputSchema": {
     "properties": {
+      "clamped": {
+        "type": "boolean"
+      },
       "moved": {
         "type": "integer"
       },
@@ -12242,11 +12377,19 @@ Returns a structured object with: `moved`, `noteCount`, `ok`.
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "moved"
+      "moved",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -12277,7 +12420,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `changed`, `noteCount`, `ok`.
+Returns a structured object with: `changed`, `clamped`, `noteCount`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -12336,16 +12479,27 @@ Returns a structured object with: `changed`, `noteCount`, `ok`.
       "changed": {
         "type": "integer"
       },
+      "clamped": {
+        "type": "boolean"
+      },
       "noteCount": {
         "type": "integer"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "changed"
+      "changed",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -12785,7 +12939,7 @@ _Additional properties: not allowed._
 
 **Returns**
 
-Returns a structured object with: `changed`, `noteCount`, `ok`.
+Returns a structured object with: `changed`, `clamped`, `noteCount`, `ok`, `warnings`.
 
 <details><summary>Full JSON schema</summary>
 
@@ -12833,16 +12987,27 @@ Returns a structured object with: `changed`, `noteCount`, `ok`.
       "changed": {
         "type": "integer"
       },
+      "clamped": {
+        "type": "boolean"
+      },
       "noteCount": {
         "type": "integer"
       },
       "ok": {
         "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "ok",
-      "changed"
+      "changed",
+      "clamped",
+      "warnings"
     ],
     "type": "object"
   }
@@ -16255,6 +16420,141 @@ Returns a structured object with: `channels`, `channelsDetail`, `clamped`, `deta
 ```
 </details>
 
+#### `analysis.revive_and_meter`
+
+**Profile:** `analysis` · **Hints:** mutating
+
+analysis.meter, plus permission to REVIVE a dead render path and read again. Runs the meter; if it refuses with render_silent_unconfirmed (the render is digital silence while a render-free accessor read of the same track finds content), this tool runs the revive action (default 40101, revalidate project sources) and meters a SECOND time, returning BOTH readings. Unlike analysis.meter it is NOT read-only: it changes project state and it says so in the payload. It does NOT restore that state -- source revalidation is not a snapshotted project field, so the restore pattern analysis.meter uses for RENDER_* settings does not reach it; `revive.restored` reports false and names why. If the meter does not refuse, NOTHING is run and `revive.attempted` is false.
+
+**Parameters**
+
+| Param | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `allowSilent` | boolean | no | default `false` |
+| `boundsFlag` | integer | no | default `1`; range [0, 7] |
+| `dryRun` | boolean | no | default `false` |
+| `endPos` | number | no | — |
+| `renderAction` | integer | no | default `41824` |
+| `reviveAction` | integer | no | default `40101` |
+| `startPos` | number | no | — |
+| `target` | integer \| string | no | — |
+
+_Additional properties: not allowed._
+
+**Returns**
+
+Returns a structured object with: `beforeRevive`, `boundsFlag`, `channels`, `channelsDetail`, `crossRead`, `detail`, `downmix`, `dryRun`, `error`, `layout`, `measuredSource`, `plan`, `program`, `rawStats`, `remediation`, `renderSilence`, `revive`, `target`, `warnings`.
+
+<details><summary>Full JSON schema</summary>
+
+```json
+{
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "allowSilent": {
+        "default": false,
+        "type": "boolean"
+      },
+      "boundsFlag": {
+        "default": 1,
+        "maximum": 7,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "dryRun": {
+        "default": false,
+        "type": "boolean"
+      },
+      "endPos": {
+        "type": "number"
+      },
+      "renderAction": {
+        "default": 41824,
+        "type": "integer"
+      },
+      "reviveAction": {
+        "default": 40101,
+        "type": "integer"
+      },
+      "startPos": {
+        "type": "number"
+      },
+      "target": {
+        "type": [
+          "integer",
+          "string"
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "outputSchema": {
+    "properties": {
+      "beforeRevive": {
+        "type": "object"
+      },
+      "boundsFlag": {
+        "type": "integer"
+      },
+      "channels": {
+        "type": "integer"
+      },
+      "channelsDetail": {
+        "type": "array"
+      },
+      "crossRead": {
+        "type": "object"
+      },
+      "detail": {
+        "type": "string"
+      },
+      "downmix": {
+        "type": "object"
+      },
+      "dryRun": {
+        "type": "boolean"
+      },
+      "error": {
+        "type": "string"
+      },
+      "layout": {
+        "type": "string"
+      },
+      "measuredSource": {
+        "type": "string"
+      },
+      "plan": {
+        "type": "string"
+      },
+      "program": {
+        "type": "object"
+      },
+      "rawStats": {
+        "type": "string"
+      },
+      "remediation": {
+        "type": "string"
+      },
+      "renderSilence": {
+        "type": "object"
+      },
+      "revive": {
+        "type": "object"
+      },
+      "target": {
+        "type": "string"
+      },
+      "warnings": {
+        "type": "array"
+      }
+    },
+    "type": "object"
+  }
+}
+```
+</details>
+
 #### `analysis.send_layout_inspect`
 
 **Profile:** `analysis` · **Hints:** read-only, idempotent
@@ -16974,4 +17274,4 @@ Scaffold an immersive Dolby Atmos session — a bed, N object tracks, a binaural
 
 ---
 
-_Reference generated 2026-08-17 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._
+_Reference generated 2026-09-02 from the live registry (`cmake --build build --target reference-doc`). See `docs/CONVENTIONS.md` for channel-order, coordinate, bed-layout, and loudness-spec conventions, and `SECURITY.md` for the transport threat model._

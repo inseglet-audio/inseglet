@@ -19,6 +19,33 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.15.0" author="James Livingston" time="2026-09-02T12:07:05Z">
+        <changelog><![CDATA[A meter that can only read a dead source now has a sibling that may revive it.
+
+`analysis.meter` refuses to report a silence its two read paths disagree about: when the audio
+accessor returns an empty window while the source is online, it reports the disagreement instead
+of a level, and tells you to run REAPER's own "rebuild peaks" action. That refusal is correct and
+it is unchanged in this release, byte for byte.
+
+What it could not do is act. `analysis.revive_and_meter` is a SEPARATE tool that may: it revives
+the dead read path and reads again, then reports the meter it got.
+
+WHY A SEPARATE TOOL AND NOT A FLAG. MCP tool annotations are static per tool. A `revive: true`
+parameter would make `analysis.meter` a tool whose `readOnly: true` annotation is a lie on exactly
+the calls that matter -- and a client that refuses mutating tools by annotation alone would be
+given no way to tell. So `analysis.meter` keeps `readOnly: true` AND keeps its refusal, and the
+permission to mutate lives in a tool your client can decline without reading a single argument.
+
+It reuses `analysis.meter`'s handler by registry lookup and re-implements nothing, so the two
+tools cannot drift apart in what they measure.
+
+It does not pretend to restore. `revive.restored` reports `false` with a reason: source
+revalidation is not a snapshotted project field, so the tool declines to claim a repair it cannot
+observe.
+
+Surface 191 tools / 4 resources / 5 prompts -- the first tool added since 1.12.0.]]></changelog>
+        <source platform="darwin" type="extension" file="reaper_mcp.dylib">https://github.com/inseglet-audio/inseglet/releases/download/v1.15.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.14.0" author="James Livingston" time="2026-08-26T08:38:29Z">
         <changelog><![CDATA[Fourteen more tools say what they adjusted, and one had nothing to say.
 

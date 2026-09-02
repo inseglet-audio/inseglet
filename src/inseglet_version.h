@@ -18,10 +18,17 @@
 // packaging/reapack/reaper_mcp.ext came to sit at @version 1.5.0 with a changelog
 // claiming 186 tools. Two lookalikes must NOT be rewritten by such a sweep:
 // ambisonic_meter.h's shelf f0 = 1681.9744509555319 and test_meter.cpp's Table 1
-// RLB a1 = -1.99004745483398.
+// RLB a1 = -1.99004745483398.  Those two are version-SPECIFIC lookalikes, not standing
+// ones: neither contains 1.14.0 or 1.15.0, and a sweep only trips on them for an
+// outgoing string they happen to embed.  Re-derive the lookalikes per release.
+//
+// AND THE TOOL COUNT IS A SECOND FIGURE WITH A SECOND SET OF SITES. A version sweep
+// CANNOT find it -- "190" contains no version string -- so it goes stale silently
+// while the version sweep reads clean. At 1.15.0, the first surface move since
+// 1.12.0, SIX files carried a stale count and only one of them was on any list.
 
 #pragma once
 
 namespace reaper_mcp {
-constexpr char kInsegletVersion[] = "1.14.0";
+constexpr char kInsegletVersion[] = "1.15.0";
 }  // namespace reaper_mcp

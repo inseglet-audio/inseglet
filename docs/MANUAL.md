@@ -1,6 +1,6 @@
 % Inseglet — User Manual
 % A native REAPER extension exposing a Model Context Protocol interface
-% Version 1.14.0 · 2026
+% Version 1.15.0 · 2026
 
 ---
 
@@ -13,7 +13,7 @@ This manual covers installation, connecting a client, the concepts you need, a c
 server can do, worked examples, and troubleshooting. For the exhaustive, machine-generated schema of
 every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from the live registry).
 
-> This document is written for v1.14.0. Inseglet currently targets **macOS first**;
+> This document is written for v1.15.0. Inseglet currently targets **macOS first**;
 > Windows and Linux build in CI and follow once load-verified in a real REAPER.
 >
 > ⚠️ **Breaking in v1.11.0: `spatial.export_adm`, `spatial.export_damf` and
@@ -39,7 +39,7 @@ every tool, resource, and prompt, see **`docs/REFERENCE.md`** (regenerated from 
 
 ## 1. Overview
 
-Inseglet exposes **190 tools**, plus MCP **resources** (live project state you can read and subscribe
+Inseglet exposes **191 tools**, plus MCP **resources** (live project state you can read and subscribe
 to) and expert **prompts**, over a local HTTP endpoint that speaks the MCP `2025-06-18` protocol. The
 tools span everyday DAW work and a deep immersive/spatial layer:
 
@@ -213,7 +213,7 @@ known modal or fatal actions can't be triggered blindly (see `SECURITY.md` and t
 ## 7. What Inseglet can do (tool catalog)
 
 The full, machine-generated reference — every parameter and output schema — is in **`docs/REFERENCE.md`**.
-The summary below orients you by area. Counts are for the current surface (190 tools total).
+The summary below orients you by area. Counts are for the current surface (191 tools total).
 
 | Area (profile) | Tools | What's in it |
 |---|---|---|

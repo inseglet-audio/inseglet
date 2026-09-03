@@ -6,6 +6,30 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.17.0] — the true-peak meter reads what the Recommendation tabulates (2026-09-03)
+
+### Changed
+- **`meter::truePeakDb` now interpolates with the 48-tap, 4-phase polyphase FIR tabulated in
+  ITU-R BS.1770-4 Annex 2, coefficient for coefficient**, and keeps the input sample as a floor.
+  The previous interpolator — a 12-tap Hann-windowed sinc with the input sample as phase 0 — was
+  inside EBU Tech 3341's +0.2/-0.4 dBTP tolerance on all five of its true-peak signals (worst
+  -0.054 dB), and was in fact closer than the Recommendation's own table on those five (worst
+  -0.316 dB); but its window droops in the top octave (per-phase -0.9 dB at 0.40 fs, -3.8 dB at
+  0.44 fs), so on dense, bright material it under-recovered the inter-sample peak — 0.163 dB low
+  at 44.1 kHz on a nine-partial test chord where the table reads 0.014 dB low — and its worst case
+  on an adversarially-phased steady tone was -0.436 dB at 2/5 fs, the one point outside the
+  envelope. The table's own worst cases (-0.65 dB at 15/32 fs, the 4x grid bound Annex 2 itself
+  states; +0.22 dB passband ripple at fs/4) are the Recommendation's, and the sample-peak floor
+  removes the one regression the table alone would have introduced (a sample-aligned peak read
+  0.22 dB below the sample). Affects `analysis.meter`, `analysis.revive_and_meter`, the mid/side
+  and downmix reports. `analysis.check_deliverable` is unchanged: it gates on REAPER's own
+  RENDER_STATS true peak.
+
+### Added
+- `tests/unit/test_meter.cpp` §3b: EBU Tech 3341 Table 1 signals 15–19 at the published
+  +0.2/-0.4 dBTP tolerance, 10 ms raised-cosine tapers, plus the floor invariant
+  (`truePeakDb >= peakDb`). Conformance is now measured on every build.
+
 ## [1.16.0] — the renders follow the project, not the sound card (2026-09-02)
 
 ### Fixed

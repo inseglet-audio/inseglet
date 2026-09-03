@@ -228,35 +228,53 @@ inline double kWeightedMeanSquare(const AudioBuffer& buf, int ch) {
 }
 
 // ------------------------------------------------------------------------------------------------
-// True peak (dBTP) — 4x oversampling per BS.1770-4 Annex 2, using a windowed-sinc polyphase FIR.
+// True peak (dBTP) — 4x oversampling per ITU-R BS.1770-4 Annex 2, using the Recommendation's own
+// tabulated 48-tap, 4-phase polyphase FIR (12 taps per phase), coefficient for coefficient.
 // ------------------------------------------------------------------------------------------------
-
-// Build a 4-phase polyphase interpolation filter (tapsPerPhase taps/phase, Hann-windowed sinc).
-inline std::vector<std::vector<double>> truePeakPolyphase(int tapsPerPhase = 12) {
-    const int OS = 4;
-    std::vector<std::vector<double>> ph(OS, std::vector<double>(tapsPerPhase, 0.0));
-    const int half = tapsPerPhase / 2;
-    for (int p = 0; p < OS; ++p) {
-        const double frac = (double)p / OS;
-        for (int t = 0; t < tapsPerPhase; ++t) {
-            const double n = (double)(t - half + 1) - frac;  // sinc argument in input samples
-            double s = (std::fabs(n) < 1e-9) ? 1.0 : std::sin(M_PI * n) / (M_PI * n);
-            const double w = 0.5 - 0.5 * std::cos(2.0 * M_PI * (t + 0.5) / tapsPerPhase);  // Hann
-            ph[p][t] = s * w;
-        }
-    }
+//
+// The four phases are mirror pairs (0<->3, 1<->2), so none of them is the input sample: the filter
+// evaluates the waveform 1/8, 3/8, 5/8 and 7/8 of a sample interval away from each sample. Its
+// passband is not flat (about +0.22 dB at fs/4, -0.22 dB at fs/6), and like every 4x interpolator it
+// under-reads a peak that falls between its own points — by up to ~0.55 dB at 0.45 fs (Annex 2,
+// Appendix 1). Both are inside the +0.2/-0.4 dB tolerance EBU Tech 3341 sets on its true-peak test
+// signals (Table 1, 15-19), which tests/unit/test_meter.cpp measures on every build.
+//
+// The previous interpolator was a 12-tap Hann-windowed sinc with the input sample as phase 0. It was
+// also inside that tolerance, but a 12-tap Hann window droops in the top octave (-0.9 dB at 0.40 fs
+// and -3.8 dB at 0.44 fs on its half-sample phase), so on dense, bright material it recovered less of
+// the inter-sample peak than this table does — about 0.15 dB less at 44.1 kHz on a nine-partial test
+// chord — and always in the direction that reads low.
+inline std::vector<std::vector<double>> truePeakPolyphase() {
+    // ITU-R BS.1770-4 Annex 2, Table: "one set of filter coefficients (for the order 48, 4-phase,
+    // FIR interpolating)". Phase p, tap t. Values are the Recommendation's (exact in Q15).
+    static const double k[4][12] = {
+        { 0.0017089843750,  0.0109863281250, -0.0196533203125,  0.0332031250000, -0.0594482421875,  0.1373291015625,
+          0.9721679687500, -0.1022949218750,  0.0476074218750, -0.0266113281250,  0.0148925781250, -0.0083007812500},
+        {-0.0291748046875,  0.0292968750000, -0.0517578125000,  0.0891113281250, -0.1665039062500,  0.4650878906250,
+          0.7797851562500, -0.2003173828125,  0.1015625000000, -0.0582275390625,  0.0330810546875, -0.0189208984375},
+        {-0.0189208984375,  0.0330810546875, -0.0582275390625,  0.1015625000000, -0.2003173828125,  0.7797851562500,
+          0.4650878906250, -0.1665039062500,  0.0891113281250, -0.0517578125000,  0.0292968750000, -0.0291748046875},
+        {-0.0083007812500,  0.0148925781250, -0.0266113281250,  0.0476074218750, -0.1022949218750,  0.9721679687500,
+          0.1373291015625, -0.0594482421875,  0.0332031250000, -0.0196533203125,  0.0109863281250,  0.0017089843750},
+    };
+    std::vector<std::vector<double>> ph(4, std::vector<double>(12, 0.0));
+    for (int p = 0; p < 4; ++p)
+        for (int t = 0; t < 12; ++t) ph[p][t] = k[p][t];
     return ph;
 }
 
+// The maximum of |x| over the input samples AND over all four interpolated phases. The input sample
+// is kept as a floor on purpose: the table alone reads a sample-aligned peak up to ~0.22 dB BELOW the
+// sample (its nearest evaluation point is 1/8 sample away, and its outer phases sit at -0.02 dB at
+// fs/4), and a true peak reported below the sample peak is not a reading anyone should act on.
 inline double truePeakDb(const AudioBuffer& buf, int ch) {
     static const std::vector<std::vector<double>> ph = truePeakPolyphase();
     const int OS = 4, taps = (int)ph[0].size(), half = taps / 2;
     double peak = 0.0;
     for (size_t i = 0; i < buf.frames; ++i) {
-        // phase 0 == the input sample itself (exact); phases 1..3 interpolate between samples.
         double s0 = std::fabs((double)buf.at(i, ch));
         if (s0 > peak) peak = s0;
-        for (int p = 1; p < OS; ++p) {
+        for (int p = 0; p < OS; ++p) {
             double acc = 0.0;
             for (int t = 0; t < taps; ++t) {
                 long idx = (long)i + (t - half + 1);

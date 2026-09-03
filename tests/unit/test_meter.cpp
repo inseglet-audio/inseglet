@@ -164,6 +164,32 @@ int main() {
         check(m.truePeakDb > -1.0, "true peak of the inter-sample signal approaches 0 dBTP");
     }
 
+    // ---- 3b. true peak against EBU Tech 3341 Table 1, signals 15-19 (+0.2 / -0.4 dBTP) ----
+    {
+        // The five true-peak "minimum requirements" signals: sines at fs/4, fs/6 and fs/8 with phases
+        // chosen so the sample grid never lands on the peak, tapered 10 ms in and out as Tech 3341
+        // specifies (a raised cosine). The +0.2/-0.4 tolerance is Tech 3341's, not ours. Signal 19
+        // exceeds full scale on purpose: a true-peak meter must read above 0 dBTP.
+        struct TP { const char* id; double fOverFs, amp, phaseDeg, expectDbTP; } cases[] = {
+            {"15", 0.25,    0.50, 0.0,  -6.0}, {"16", 0.25,  0.50, 45.0, -6.0}, {"17", 1.0 / 6, 0.50, 60.0, -6.0},
+            {"18", 0.125,   0.50, 67.5, -6.0}, {"19", 0.25,  1.41, 45.0,  3.0}};
+        const size_t nf = (size_t)(sr * 0.010);
+        for (const auto& c : cases) {
+            AudioBuffer b = makeBuffer(1, sr, N);
+            for (size_t i = 0; i < N; ++i) {
+                double g = 1.0;
+                if (i < nf)          g = 0.5 - 0.5 * std::cos(M_PI * (double)i / (double)nf);
+                else if (i >= N - nf) g = 0.5 - 0.5 * std::cos(M_PI * (double)(N - 1 - i) / (double)nf);
+                setSample(b, i, 0, g * c.amp * std::sin(2 * M_PI * c.fOverFs * (double)i + c.phaseDeg * M_PI / 180.0));
+            }
+            ChannelMetrics m = analyzeChannel(b, 0);
+            const double err = m.truePeakDb - c.expectDbTP;
+            check(err >= -0.4 && err <= 0.2, std::string("Tech 3341 signal ") + c.id +
+                  ": true peak within +0.2/-0.4 dBTP of " + std::to_string(c.expectDbTP) + " (err " + std::to_string(err) + ")");
+            check(m.truePeakDb >= m.peakDb - 1e-9, std::string("Tech 3341 signal ") + c.id + ": true peak is never below the sample peak");
+        }
+    }
+
     // ---- 4. K-weighting: ~flat at 1 kHz, attenuates lows, +6 dB doubling ----
     {
         AudioBuffer k1 = makeBuffer(1, sr, N);

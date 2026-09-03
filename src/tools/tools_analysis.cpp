@@ -573,7 +573,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                 setProjStr("RENDER_FILE", outDirUse);
                 setProjStr("RENDER_PATTERN", std::string("_mcp_analysis - ") + spec->name + " - $track");
                 setProjStr("RENDER_FORMAT", useFmt);
-                setProjNum("RENDER_SRATE", 0);
+                setProjNum("RENDER_SRATE", resolveRenderSrate(a));   // the project, not the device
                 setProjNum("RENDER_CHANNELS", maxCh >= 2 ? maxCh : 2);
                 setProjNum("RENDER_ADDTOPROJ", 0);
                 setProjNum("RENDER_NORMALIZE", (double)(1 | 64 | 128 | 256));
@@ -676,7 +676,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             setProjStr("RENDER_FILE", outDirUse);
             setProjStr("RENDER_PATTERN", std::string("_mcp_analysis - ") + spec->name);
             setProjStr("RENDER_FORMAT", useFmt);
-            setProjNum("RENDER_SRATE", 0);
+            setProjNum("RENDER_SRATE", resolveRenderSrate(a));   // the project, not the device
             setProjNum("RENDER_CHANNELS", channels >= 2 ? channels : 2);
             setProjNum("RENDER_ADDTOPROJ", 0);
             // RENDER_NORMALIZE bitmask: &1 enable, (LUFS-I type = 0), &64 brickwall-limit, &128 brickwall
@@ -764,7 +764,18 @@ void registerAnalysisTools(ToolRegistry& reg) {
         "true-peak, sample peak — ITU-R BS.1770) AND per-channel metrics the render engine cannot give: "
         "per-channel RMS, sample peak, oversampled true-peak (dBTP) and K-weighted level, with SMPTE "
         "bed-layout labels (5.1/7.1/7.1.4/9.1.6/22.2) and LFE flagged. Also reports L/R phase "
-        "correlation (mono/downmix compatibility). Runs ONE bounded, non-destructive analysis render "
+        "correlation (mono/downmix compatibility). Reports the SAMPLE RATE the measurement was "
+        "actually taken at (rate.rendered), read from the analysis render's own WAV header - "
+        "NOT a project setting, and NOT the accessor rate analysis.read_samples reports, which "
+        "is a different read path; rate.project is reported beside it and rate.agree says "
+        "whether they match, because a render that did not happen at the project's rate is "
+        "worth seeing rather than reconciling. The analysis render is REQUESTED at the project's "
+        "sample rate rather than following the audio engine, so rate.requested reports what was "
+        "asked for and rate.device reports the audio device's own rate - when the device differs "
+        "from the project, REAPER is resampling and a warning says where to fix it. Pass "
+        "renderRate:\"follow\" to make the render follow the audio engine (and therefore the "
+        "audio device) instead, or a number to force a specific rate. "
+        "Runs ONE bounded, non-destructive analysis render "
         "(snapshots + restores every RENDER_* field + selection; the temp file is deleted after "
         "reading) using the measure-don't-limit config, so a headroomed master is measured exactly. "
         "Bound the range with boundsFlag (0 = custom startPos/endPos, 1 = ENTIRE PROJECT — the default, "
@@ -775,13 +786,15 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "boundsFlag":{"type":"integer","minimum":0,"maximum":7,"default":1},
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
+            "renderRate":{"type":["string","number"],"default":"project",
+                "description":"sample rate for the analysis render: \"project\" (the default - request the project's rate), \"follow\" (follow the audio engine, and therefore the audio device), or a positive number to force one"},
             "allowSilent":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
             "target":{"type":"string"},"channels":{"type":"integer"},"layout":{"type":"string"},
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
-            "downmix":{"type":"object"},"measuredSource":{"type":"string"},
+            "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "plan":{"type":"string"},"dryRun":{"type":"boolean"},
@@ -827,6 +840,31 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                      "target → RENDER_STATS (program loudness) + read the temp WAV "
                                      "(per-channel level/peak/true-peak/K-level + L/R correlation) → "
                                      "delete temp → restore"}};
+
+            // ⛔ THE DEVICE RATE MUST BE READ *BEFORE* THE RENDER; THE FIRST BUILD READ IT AFTER.
+            //   GetAudioDeviceInfo returns false when the device is not open, and an offline render
+            //   can close it -- so the first build reported "the audio device is not running or
+            //   reported no rate" on every single call, on a host whose device was demonstrably
+            //   running at 44100. Own defect, caught by the instrument written to check the field
+            //   itself, and recorded rather than quietly moved.
+            // ⛔ AND THE ABSENCE MUST NAME ITS OWN CAUSE (two states no instrument
+            //   distinguishes are one state). v2 reported a single "not running or reported no
+            //   rate", which cannot tell "REAPER's audio device is closed" from "the device is open
+            //   and would not answer" -- and those need different actions from the user. v3 splits
+            //   them, because an absence whose cause is unknown is not a measurement.
+            double deviceRate = 0.0;
+            int deviceWhy = 0;   // 0 = read it · 1 = audio not running · 2 = device would not answer
+            {
+                char deviceBuf[64] = {0};
+                if (!Audio_IsRunning()) {
+                    deviceWhy = 1;
+                } else if (!GetAudioDeviceInfo("SRATE", deviceBuf, (int)sizeof(deviceBuf))) {
+                    deviceWhy = 2;
+                } else {
+                    deviceRate = std::atof(deviceBuf);
+                    if (!(deviceRate > 0.0)) deviceWhy = 2;
+                }
+            }
 
             TempRender tr = renderTargetToTempWav(targetTrack, channels, /*measureLoudness*/ true,
                                                   boundsFlag, a);
@@ -1048,10 +1086,120 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                : std::string("mono-compatible"));
             }
 
+            // ---- THE RATE FIELD ------------------------------------------------------------
+            // WHY THIS TOOL HAD NO RATE, AND WHY THE OBVIOUS SUBSTITUTE IS THE WRONG ONE.
+            //   analysis.meter IS the render path and reported NO sample rate, while
+            //   analysis.read_samples reports one whose measuredSource is `accessor` -- THE
+            //   OTHER PATH, and that is exactly where the two disagreed.  A client wanting
+            //   this tool's rate had to read it off a tool measuring something else.
+            //   A client "had no field to gate on"; this is that field.
+            // THE REFERENT IS THE RENDERED FILE, NOT A SETTING.  tr.buf.sampleRate is read from
+            //   the temp WAV's own `fmt` chunk, by the same reader that produced the samples
+            //   every number in this payload is computed from.  It therefore CANNOT disagree
+            //   with the measurement it describes -- which a project setting can, and did:
+            //   a ranked miss was project.new returning 44100 while the leg injected
+            //   48 kHz tones.
+            // THE PROJECT RATE IS REPORTED BESIDE IT AND NEVER INSTEAD OF IT.
+            //   ⛔ THIS COMMENT SAID "the temp render is configured to follow the project
+            //   (RENDER_SRATE=0 in render_stems.h)" UNTIL 1.16.0, AND THAT SENTENCE WAS NEVER
+            //   TRUE: RENDER_SRATE=0 follows the ENGINE, which follows the AUDIO DEVICE, and the
+            //   device is not the project. It read as if 0 meant "the project's rate" and the
+            //   whole defect lived in that gap. The render is now REQUESTED at the
+            //   project rate, so the two SHOULD agree; a disagreement now means the render did
+            //   not honour the request, which is worth SEEING rather than reconciling.
+            //   Two states no instrument distinguishes are one state.
+            // ZERO IS NOT A RATE.  The WAV reader validates the fmt chunk and the channel count
+            //   but NOT the rate field, so a malformed header parses "successfully" at 0 Hz.
+            //   This reports known:false with a reason rather than publishing a 0 -- 121(a),
+            //   a quantity whose source cannot be given is UNPROVEN, never a value.
+            // ---- THIS FIELD WAS EXTENDED RATHER THAN REPLACED --------------------------------
+            // `agree` was built to compare rendered against project, and its FIRST live call
+            // read 44100 against 48000. What that cost beyond this payload was then measured:
+            // export_adm with the Dolby profile REFUSED a correctly-configured project (the remedy
+            // it printed was already done), and export_adm ON DEFAULTS shipped an ADM master whose
+            // fmt chunk and ADM XML both said 44100, with no warning, because the only two rate
+            // checks in the tree are gated on non-default parameters.
+            // THE FIX FORCES THE RENDER TO THE PROJECT RATE (render_stems.h resolveRenderSrate),
+            // WHICH WOULD HAVE MADE `agree` VACUOUSLY TRUE AND KILLED THE DETECTOR. So the detector
+            // is RE-POINTED, not removed:
+            //   rate.requested -> what the render was ASKED for, so `agree` now means "did the
+            //                     render HONOUR the request", which is a real defect when false.
+            //   rate.device    -> the audio device's own rate. THIS is the quantity that silently
+            //                     determined every measurement before 1.16.0, and nothing ever
+            //                     reported it. When it differs from the project rate the render is
+            //                     being resampled, and the user is told WHERE to act.
+            Json rate = Json::object();
+            const double renderedRate = tr.buf.sampleRate;
+            const bool rateKnown = renderedRate > 0.0;
+            const double projRate = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0.0, false);
+            const double reqRate = resolveRenderSrate(a);
+            // 121(a): a device rate we cannot establish is NEVER published. Audio_IsRunning() gates
+            // it because a stopped device has no current rate, only a remembered one.
+            // ⛔ CAPTURED BEFORE THE RENDER -- see the comment at the capture site. Reading it here
+            //   asks a closed device what rate it is running at, and gets the truthful answer "I am
+            //   not running", which is useless and reads as an absence in the data.
+            const double devRate = deviceRate;
+            rate["requested"] = reqRate;
+            rate["requestedSource"] = reqRate > 0.0
+                ? std::string("RENDER_SRATE, requested at the project rate for this render; "
+                              "pass renderRate:\"follow\" for the engine-following behaviour")
+                : std::string("RENDER_SRATE 0 - follow the engine, which follows the audio device");
+            if (devRate > 0.0) {
+                rate["device"] = devRate;
+                rate["deviceSource"] = "GetAudioDeviceInfo(\"SRATE\") - the AUDIO DEVICE, not the "
+                                       "project and not the render";
+            } else {
+                rate["deviceReason"] = (deviceWhy == 1)
+                    ? std::string("REAPER's audio device is CLOSED at this moment "
+                                  "(Audio_IsRunning() is 0), so it has no current rate to report - "
+                                  "only a remembered one, which would be a guess. This is common "
+                                  "when REAPER is in the background with the transport stopped. "
+                                  "Nothing is claimed here rather than reporting a 0")
+                    : std::string("REAPER's audio device is OPEN but did not answer for SRATE, "
+                                  "which is a different state from the device being closed. "
+                                  "Nothing is claimed here rather than reporting a 0");
+            }
+            if (devRate > 0.0 && projRate > 0.0
+                && (long long)(devRate + 0.5) != (long long)(projRate + 0.5))
+                warnings.push_back(
+                    "the AUDIO DEVICE is running at " + std::to_string((long long)(devRate + 0.5)) +
+                    " Hz while the project is " + std::to_string((long long)(projRate + 0.5)) +
+                    " Hz - this render was forced to the project rate, so these figures describe "
+                    "the project's rate, but REAPER is resampling. On macOS this is usually "
+                    "Preferences > Audio > Device: either enable 'Request sample rate' at the "
+                    "project rate, or set the output device to it.");
+            rate["known"] = rateKnown;
+            if (rateKnown) rate["rendered"] = renderedRate;
+            else rate["reason"] = "the rendered WAV's fmt chunk carried no usable sample rate; "
+                                  "nothing is claimed here rather than reporting a 0";
+            rate["renderedSource"] = "the fmt chunk of the temp WAV these metrics were computed "
+                                     "from - not a project setting, and not the accessor path "
+                                     "that analysis.read_samples reports";
+            if (projRate > 0.0) rate["project"] = projRate;
+            rate["projectSource"] = "PROJECT_SRATE";
+            if (rateKnown && projRate > 0.0) {
+                const long long rr = (long long)(renderedRate + 0.5);
+                const long long pr = (long long)(projRate + 0.5);
+                rate["agree"] = (rr == pr);
+                if (rr != pr)
+                    warnings.push_back(
+                        "the render was MEASURED at " + std::to_string(rr) + " Hz while the "
+                        "project is set to " + std::to_string(pr) + " Hz - this render was "
+                        "REQUESTED at the project rate (RENDER_SRATE " +
+                        std::to_string((long long)(reqRate + 0.5)) + "), so a disagreement here "
+                        "means the render did not HONOUR that request rather than that it "
+                        "followed the engine. Every figure in this payload describes the "
+                        "RENDERED rate. Pass renderRate:\"follow\" to make the render follow the "
+                        "audio engine deliberately.");
+            } else {
+                rate["agreeReason"] = "one of the two rates is unknown, so they are NOT "
+                                      "comparable - this is an absence, not a disagreement";
+            }
+
             return Json{{"target", targetLabel}, {"channels", nc}, {"layout", bedLayoutName(nc)},
                         {"boundsFlag", boundsFlag}, {"program", program},
                         {"channelsDetail", chDetail}, {"downmix", downmix},
-                        {"measuredSource", "render+samples"},
+                        {"measuredSource", "render+samples"}, {"rate", rate},
                         {"renderSilence", renderSilence}, {"crossRead", crossRead},
                         {"rawStats", f0.contains("stats") ? f0["stats"] : Json::object()},
                         {"warnings", warnings}};
@@ -3330,7 +3478,10 @@ void registerAnalysisTools(ToolRegistry& reg) {
         ToolRegistry* R = &reg;
         reg.add(Tool{
         "analysis.revive_and_meter",
-        "analysis.meter, plus permission to REVIVE a dead render path and read again. Runs the "
+        "analysis.meter, plus permission to REVIVE a dead render path and read again. Reports the "
+        "same rate block analysis.meter does (rate.rendered is the analysis render's own WAV "
+        "header; rate.project is PROJECT_SRATE; rate.agree says whether they match) - it "
+        "reuses that tool's handler, so the field is the same field and not a copy. Runs the "
         "meter; if it refuses with render_silent_unconfirmed (the render is digital silence while a "
         "render-free accessor read of the same track finds content), this tool runs the revive "
         "action (default 40101, revalidate project sources) and meters a SECOND time, returning BOTH "
@@ -3345,13 +3496,15 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "startPos":{"type":"number"},"endPos":{"type":"number"},
             "renderAction":{"type":"integer","default":41824},
             "reviveAction":{"type":"integer","default":40101},
+            "renderRate":{"type":["string","number"],"default":"project",
+                "description":"sample rate for the analysis render: \"project\" (the default - request the project's rate), \"follow\" (follow the audio engine), or a positive number. Passed through to analysis.meter unchanged"},
             "allowSilent":{"type":"boolean","default":false},
             "dryRun":{"type":"boolean","default":false}},
             "additionalProperties":false})"),
         jparse(R"({"type":"object","properties":{
             "target":{"type":"string"},"channels":{"type":"integer"},"layout":{"type":"string"},
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
-            "downmix":{"type":"object"},"measuredSource":{"type":"string"},
+            "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "revive":{"type":"object"},"beforeRevive":{"type":"object"},
@@ -3365,9 +3518,17 @@ void registerAnalysisTools(ToolRegistry& reg) {
             const bool dryRun      = optBool(a, "dryRun", false);
 
             // Pass EXACTLY analysis.meter's own parameters through -- never our own extras.
+            // ⚠️ THIS ALLOW-LIST IS A HAND-MAINTAINED DUPLICATE OF analysis.meter's INPUT
+            //   SCHEMA, AND NOTHING CHECKS THAT THE TWO AGREE. The handler is inherited by registry
+            //   lookup and needs no edit when meter's BEHAVIOUR changes -- the sibling's whole point,
+            //   and it held for the rate forcing -- but a new PARAMETER silently fails to reach
+            //   the inherited handler until someone remembers this line. `renderRate` is the first
+            //   case; it will not be the last. In C++ terms: a scope that is a strict
+            //   subset of the thing it stands for. Raised, not fixed here -- deriving the list from
+            //   meter's own schema at call time is a design change, not a chore.
             Json m = Json::object();
             for (const char* k : {"target","boundsFlag","startPos","endPos","renderAction",
-                                  "allowSilent","dryRun"})
+                                  "renderRate","allowSilent","dryRun"})
                 if (a.contains(k)) m[k] = a[k];
 
             const Tool* meter = R ? R->find("analysis.meter") : nullptr;

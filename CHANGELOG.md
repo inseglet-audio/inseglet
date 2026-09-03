@@ -6,6 +6,51 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.16.0] — the renders follow the project, not the sound card (2026-09-02)
+
+### Fixed
+- **Every analysis and deliverable render was following the AUDIO DEVICE, not the project.**
+  `RENDER_SRATE` was a hardcoded `0` — *follow the engine* — at `render_stems.h:60`/`:139` and
+  `tools_analysis.cpp:576`/`:679`, and REAPER's engine follows the audio device. On a Mac with
+  `coreaudiosrateuse=0` REAPER never asks the device for the project's rate at all.
+  Measured on a project declaring 48000 whose device runs 44100:
+  - `analysis.meter` reported LUFS, dBTP and K-level from a **44100** render while every
+    rate-reporting tool said 48000;
+  - `spatial.export_adm` with `profile:"dolby-atmos"` **refused** that project with
+    `sample_rate_not_48k` and a remedy — *"set the project sample rate to 48000"* — the user had
+    already applied;
+  - `spatial.export_adm` **on defaults succeeded** and wrote an ADM BWF whose `fmt` chunk and ADM
+    XML both said 44100, **with no warning**, because the only two rate checks in the tree
+    (`adm_profile.h`'s `normalizeModel`, `adm_bwf.h`'s `dolbyMetadataRefusal` C2) are both gated on
+    non-default parameters. Two of the three export tools already had the check unconditionally;
+    the most general one did not.
+  `resolveRenderSrate()` now returns `PROJECT_SRATE`, or `0` when it cannot be established — a rate
+  that cannot be established is never published as one.
+- **Every rate refusal's remedy now names the real cause**, including the audio device's own rate
+  when it can be read, instead of naming a project setting that may already be correct.
+
+### Added
+- **`renderRate`** on `analysis.meter` and `analysis.revive_and_meter`: `"project"` (the new
+  default), `"follow"` (the previous behaviour, reachable by name), or a positive number.
+  Nothing is taken away, and the A/B that justifies the default stays reproducible on any host.
+- **`rate.requested`** — what the render was asked for, so `rate.agree` now means *did the render
+  honour the request* rather than *did it happen to match*.
+- **`rate.device`** — the audio device's own rate via `GetAudioDeviceInfo("SRATE")`. This is the
+  quantity that silently determined every measurement and that nothing had ever reported. When
+  REAPER's device is closed it reports **which** absence it hit rather than a single ambiguous
+  reason: two states nothing distinguishes are one state.
+- **A warning on `spatial.export_adm`'s default path** when the rendered rate is not the project's,
+  and when a deliverable is not 48 kHz. It **warns and does not refuse** — BS.2076 ADM at 44.1 kHz
+  is legal; it is the Atmos profile and IAMF that mandate 48 k, and those paths already refuse.
+
+### Notes
+- No tools were added or removed: the surface stays at 191.
+- Forcing the render rate means REAPER resamples, and the payload says so rather than leaving the
+  user to work it out.
+- **Known and unfixed:** `analysis.revive_and_meter` copies `analysis.meter`'s parameters through a
+  hand-maintained allow-list, and nothing checks it against meter's input schema. `renderRate` is
+  the first parameter that needed adding there by hand.
+
 ## [1.15.0] — a meter that could only refuse now has a sibling that may act (2026-09-02)
 
 ### Added

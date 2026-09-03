@@ -32,6 +32,12 @@
 #define REAPERAPI_WANT_GetProjectName
 #define REAPERAPI_WANT_GetSetProjectInfo
 #define REAPERAPI_WANT_GetSetProjectInfo_String
+// The AUDIO DEVICE's own rate. The render engine follows the device, not the
+// project, so this is the quantity that silently determined every measurement this product has ever
+// taken -- and nothing anywhere reported it. Guarded by Audio_IsRunning(): with the device stopped
+// there is no rate to report and 121(a) says we publish nothing rather than a stale one.
+#define REAPERAPI_WANT_GetAudioDeviceInfo
+#define REAPERAPI_WANT_Audio_IsRunning
 
 // --- tracks ---
 #define REAPERAPI_WANT_CountTracks

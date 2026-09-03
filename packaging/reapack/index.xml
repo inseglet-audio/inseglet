@@ -19,6 +19,47 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.16.0" author="James Livingston" time="2026-09-03T00:24:45Z">
+        <changelog><![CDATA[The meter was measuring at your sound card's rate, not your project's -- and the ADM export was shipping files labelled with it.
+
+REAPER's render engine follows the audio device. Unless you have asked REAPER to request a
+specific rate, the device runs at whatever rate it likes, and every render follows it -- including
+the temporary renders this extension uses to measure loudness and to author deliverables. If your
+project says 48 kHz and your interface is running at 44.1, the numbers you were reading, and the
+files you were writing, were 44.1.
+
+Nothing was lying. `analysis.meter` reported its figures honestly, `spatial.export_adm` wrote the
+rate it actually rendered at into both the WAV header and the ADM metadata, and the project setting
+reported the project setting. There was simply nothing anywhere that compared the two numbers.
+
+WHAT CHANGES. The analysis and deliverable renders are now REQUESTED at the project's sample rate
+instead of following the engine. On a correctly configured machine nothing changes at all. On a
+machine where the device is running at another rate:
+
+  * `analysis.meter` now measures what your project actually is. True peak is the figure that
+    moves -- it is oversampled from the rendered samples, so the rate it was rendered at matters.
+  * `spatial.export_adm` with `profile: "dolby-atmos"` stops refusing a project that is already at
+    48 kHz. It used to refuse with "set the project sample rate to 48000", which was no help if you
+    had already done exactly that.
+  * `spatial.export_adm` on its default settings stops silently writing a master at the wrong rate.
+    It now warns when the rendered rate is not the project's, and every rate refusal in the
+    extension names the real cause -- including your audio device's rate when it can read it.
+
+`analysis.meter` and `analysis.revive_and_meter` also report `rate.requested` (what the render was
+asked for) and `rate.device` (your audio interface's own rate, when REAPER's device is open), so
+you can see where a disagreement comes from rather than guessing.
+
+IF YOU WANT THE OLD BEHAVIOUR, ASK FOR IT BY NAME. Both tools take `renderRate`: `"project"` is the
+new default, `"follow"` is the previous behaviour, and a number forces a specific rate. Nothing is
+taken away.
+
+ONE THING THIS DOES NOT FIX. Forcing the render rate means REAPER resamples. That is the right
+trade for a measurement that has to describe your deliverable, but it is a resample, and the
+extension says so in a warning rather than leaving you to work it out.
+
+No tools were added or removed.]]></changelog>
+        <source main="true" platform="darwin">https://github.com/inseglet-audio/inseglet/releases/download/v1.16.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.15.0" author="James Livingston" time="2026-09-02T12:07:05Z">
         <changelog><![CDATA[A meter that can only read a dead source now has a sibling that may revive it.
 

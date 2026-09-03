@@ -28,6 +28,71 @@ namespace reaper_mcp {
 
 #ifdef REAPER_MCP_HAVE_SDK
 
+// ---- THE RENDER RATE ---------------------------------------------------------------------------
+// WHY THIS IS NOT A HARDCODED 0 ANY MORE.
+//   RENDER_SRATE = 0 means "follow the engine", and the engine follows the AUDIO DEVICE, which need
+//   not be at the project's rate -- on a Mac with `coreaudiosrateuse=0` REAPER does not even ask for
+//   one. Measured on a project declaring 48000 whose device runs 44100:
+//     * analysis.meter reported LUFS / dBTP / K-level from a 44100 render while every rate-reporting
+//       tool said 48000, and before the meter gained a rate field it reported none at all;
+//     * spatial.export_adm with profile "dolby-atmos" REFUSED the project with sample_rate_not_48k,
+//       and the remedy it printed -- "set the project sample rate to 48000" -- was already done;
+//     * spatial.export_adm ON DEFAULTS SUCCEEDED and wrote an ADM BWF whose `fmt` chunk and ADM XML
+//       both say 44100, with NO warning about the rate, because the only two rate checks in the
+//       codebase (adm_profile.h's normalizeModel and adm_bwf.h's dolbyMetadataRefusal C2) are BOTH
+//       gated on non-default parameters. Nothing lied; nothing was in a position to compare.
+//   The product already forced an explicit rate on ONE render path (tools_spatial.cpp's
+//   render_deliverables) and followed the engine on every other. This makes them agree.
+// 121(a): A RATE WE CANNOT ESTABLISH IS NEVER PUBLISHED AS ONE. If PROJECT_SRATE is not positive we
+//   return 0 -- follow -- because inventing a rate would be worse than inheriting one.
+// THE OLD BEHAVIOUR STAYS REACHABLE, DELIBERATELY. `renderRate` accepts "project" (default),
+//   "follow" (the previous behaviour), or a positive number. The A/B is therefore reproducible
+//   host without editing this file, which is the difference between a measurement and an anecdote.
+inline double resolveRenderSrate(const Json& a) {
+    if (a.contains("renderRate")) {
+        const Json& rr = a["renderRate"];
+        if (rr.is_number()) {
+            const double v = rr.get<double>();
+            if (v > 0.0) return v;
+        } else if (rr.is_string()) {
+            const std::string s = rr.get<std::string>();
+            if (s == "follow") return 0.0;   // the previous behaviour, asked for by name
+            // any other string, "project" included, falls through to the project rate below
+        }
+    }
+    const double pr = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0.0, false);
+    return pr > 0.0 ? pr : 0.0;
+}
+
+// ---- THE REMEDY A RATE REFUSAL SHOULD PRINT ----------------------------------------------------
+// "set the project/render sample rate to 48000 and retry" was MEASURED MISDIRECTING on 2026-09-02:
+// the project WAS 48000, and the render came out at 44100 because RENDER_SRATE followed the audio
+// device. A remedy naming a setting the user has already applied is worse than no remedy -- it
+// sends them to the wrong screen and makes the product look broken rather than the host misconfigured.
+// This builds the remedy from what is TRUE RIGHT NOW: the project rate, and the device rate when
+// the device is running. 121(a): it never asserts a device rate it could not read.
+inline std::string renderRateRemedy(int got) {
+    const double pr = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0.0, false);
+    double dev = 0.0;
+    char dbuf[64] = {0};
+    if (Audio_IsRunning() && GetAudioDeviceInfo("SRATE", dbuf, (int)sizeof(dbuf)))
+        dev = std::atof(dbuf);
+    const long long p = (long long)(pr + 0.5), d = (long long)(dev + 0.5);
+    if (pr > 0.0 && (long long)got == p)
+        return "the project is already at " + std::to_string(p) + " Hz, so change the DELIVERABLE "
+               "requirement rather than the project - this format mandates 48000";
+    std::string s = "the render produced " + std::to_string(got) + " Hz";
+    if (pr > 0.0) s += " while the project is set to " + std::to_string(p) + " Hz";
+    if (dev > 0.0 && p > 0 && d != p)
+        s += ", and the AUDIO DEVICE is running at " + std::to_string(d) + " Hz - that is the "
+             "cause. Set the project rate to 48000 AND make the device follow it "
+             "(Preferences > Audio > Device: 'Request sample rate', or change the output device's "
+             "own rate), then retry";
+    else
+        s += " - set the project sample rate to 48000 and retry";
+    return s;
+}
+
 // Result of a bounded, non-destructive temp-render used to read back samples for the metering DSP.
 struct TempRender {
     bool ok = false;
@@ -57,7 +122,7 @@ inline TempRender renderTargetToTempWav(int targetTrack, int channels, bool meas
     setProjStr("RENDER_FILE", dir);
     setProjStr("RENDER_PATTERN", pattern);
     setProjStr("RENDER_FORMAT", snap.format.empty() ? std::string("evaw") : snap.format);
-    setProjNum("RENDER_SRATE", 0);
+    setProjNum("RENDER_SRATE", resolveRenderSrate(a));   // was a hardcoded 0 -- see above
     setProjNum("RENDER_CHANNELS", channels >= 2 ? channels : 2);
     setProjNum("RENDER_ADDTOPROJ", 0);
     if (measureLoudness) {
@@ -136,7 +201,7 @@ inline MultiStemRender renderTracksToTempWavs(const std::vector<int>& tracks,
     setProjStr("RENDER_FILE", dir);
     setProjStr("RENDER_PATTERN", "_mcp_meter_stem - $track");
     setProjStr("RENDER_FORMAT", snap.format.empty() ? std::string("evaw") : snap.format);
-    setProjNum("RENDER_SRATE", 0);
+    setProjNum("RENDER_SRATE", resolveRenderSrate(a));   // was a hardcoded 0 -- see above
     setProjNum("RENDER_CHANNELS", maxCh >= 2 ? maxCh : 2);
     setProjNum("RENDER_ADDTOPROJ", 0);
     if (measureLoudness) {

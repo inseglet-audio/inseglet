@@ -3691,7 +3691,34 @@ void registerSpatialTools(ToolRegistry& reg) {
                 return makeError("sample_rate_not_48k",
                                  "the render produced a " + std::to_string(m.sampleRate) +
                                      " Hz file; the Dolby Atmos Master ADM Profile mandates 48000",
-                                 "set the project/render sample rate to 48000 and retry");
+                                 renderRateRemedy(m.sampleRate));   // was a fixed string
+
+            // ---- THE DEFAULT PATH HAD NO RATE COMPARISON AT ALL ------------------------------
+            // export_damf and export_loom_manifest both refuse a non-48k render UNCONDITIONALLY.
+            // This tool -- the most general of the three -- gated its only rate check behind
+            // profile "dolby-atmos", and the second (adm_bwf.h's dolbyMetadataRefusal C2) behind
+            // dolbyMetadataChunk "placeholder". Both default to "none", so on defaults NOTHING
+            // compared the rendered rate to the project's, and this tool was measured shipping
+            // a 44100 ADM master -- labelled 44100 honestly in its fmt chunk, its ADM XML and its
+            // payload -- on a project declaring 48000, with no warning. Nobody lied; nothing was
+            // in a position to notice.
+            // IT WARNS, IT DOES NOT REFUSE. BS.2076 ADM at 44.1 kHz is legal; it is the ATMOS
+            // profile and IAMF that mandate 48k, and those already refuse above. Turning a legal
+            // export into an error is a bigger change than this beat was asked for.
+            {
+                const double pr262 = GetSetProjectInfo(nullptr, "PROJECT_SRATE", 0.0, false);
+                if (pr262 > 0.0 && m.sampleRate != (int)std::llround(pr262))
+                    warnings.push_back(
+                        "this deliverable was rendered at " + std::to_string(m.sampleRate) +
+                        " Hz but the project is set to " + std::to_string((int)std::llround(pr262)) +
+                        " Hz - the file and its ADM metadata both declare the RENDERED rate. " +
+                        renderRateRemedy(m.sampleRate));
+                else if (m.sampleRate != adm::profile::kSampleRate)
+                    warnings.push_back(
+                        "this deliverable is " + std::to_string(m.sampleRate) + " Hz. That is "
+                        "valid BS.2076 ADM, but the Dolby Atmos Master ADM Profile and IAMF both "
+                        "mandate 48000, so it will be rejected downstream by either.");
+            }
 
             // Re-check the `dbmd` refusals against the ACTUAL rendered rate — the sample-rate half
             // (C2) could not be known before the render. Same shape as the Atmos profile's 48 kHz
@@ -4088,7 +4115,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                 return makeError("sample_rate_not_48k",
                                  "the render produced a " + std::to_string(m.sampleRate) +
                                      " Hz file; DAMF mandates 48000",
-                                 "set the project/render sample rate to 48000 and retry");
+                                 renderRateRemedy(m.sampleRate));   // was a fixed string
 
             damf::Triad tri = damf::writeTriad(m, channels, frames, stem);
             if (!tri.ok) return makeError("damf_write_failed",
@@ -4551,7 +4578,7 @@ void registerSpatialTools(ToolRegistry& reg) {
                 return makeError("sample_rate_not_48k",
                                  "the render produced " + std::to_string((int)std::llround(sampleRate)) +
                                      " Hz; Loom's source gate requires 48000 Hz integer PCM (M-308)",
-                                 "set the project sample rate to 48000 and retry");
+                                 renderRateRemedy((int)std::llround(sampleRate)));
 
             std::error_code ec;
             std::filesystem::create_directories(std::filesystem::path(outDir) / "wavs", ec);

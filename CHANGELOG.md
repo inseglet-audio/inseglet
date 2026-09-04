@@ -6,6 +6,35 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.18.0] — every true-peak reading says whether it came from an edge (2026-09-04)
+
+### Added
+- **`truePeakDbInterior` and `truePeakEdgeDominated` on the SEVEN other tools that report a true
+  peak from a bounded window**: `analysis.read_samples`, `analysis.accessor_meter`,
+  `analysis.stem_loudness`, `analysis.dialog_loudness`, `analysis.downmix_check`,
+  `analysis.object_loudness`, `analysis.binaural_check`. 1.17.0 added them to `analysis.meter`
+  only; the interpolator is fed zeros outside whatever range was asked for, **whichever read path
+  asked**, so those seven were reporting a number this project already knew was incomplete. Each
+  payload also carries `truePeakEdgeGuardSamples` once, so the number states the width it used.
+  Where a tool reports one peak across N channels, its companion is the maximum of the channels'
+  interiors, and a tie reads `false` — the same rule `analysis.meter` uses.
+- **`window` on `analysis.meter` and `analysis.revive_and_meter`** — `requestedStartSec`,
+  `requestedDurSec`, `requestedFramesAtRenderedRate`, `renderedFrames`, `renderedDurSec`,
+  `snapDeltaSamples` and `snapped`, plus a warning when the two differ. REAPER quantises render
+  bounds, so a window asked for in samples is not always the window measured, and the reported true
+  peak moves with the window's edges. **No grid constant is stated**: the quantum is a reading at a
+  given sample rate, not a law, and the two numbers let a caller measure it.
+- **`serverInfo.build` on `initialize`, and `buildUuid` in the discovery file** — the `LC_UUID` of
+  the Mach-O image mapped into the running process. A version string only moves when a release
+  moves it, so two different builds report the same one; this is the identity of the **executing
+  code**, and it cannot be changed by overwriting the file on disk. Compare it with
+  `dwarfdump --uuid` on the installed dylib: a disagreement means the plug-in was replaced and
+  REAPER was never restarted. `null` on platforms with no Mach-O `LC_UUID`, never a substitute.
+
+### Unchanged
+- **`truePeakDb` itself.** Measured on the 1.17.0 build and this one over the same 17 reported
+  values on the same project and window, every one differed by `+0.000000` dB.
+
 ## [1.17.0] — the true-peak meter reads what the Recommendation tabulates (2026-09-03)
 
 ### Changed

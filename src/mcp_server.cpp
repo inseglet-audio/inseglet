@@ -15,6 +15,7 @@
 
 #include "mcp_server.h"
 
+#include "build_identity.h"
 #include "inseglet_version.h"
 
 #include <chrono>
@@ -138,7 +139,22 @@ Json McpServer::handleInitialize(const Json& params) {
          {{"tools", {{"listChanged", false}}},
           {"resources", {{"listChanged", false}, {"subscribe", true}}},
           {"prompts", {{"listChanged", false}}}}},
-        {"serverInfo", {{"name", kServerName}, {"version", kServerVersion}}},
+        // ---- WHICH BUILD IS ANSWERING THIS HANDSHAKE. ----
+        // `version` moves only when a RELEASE moves it, so two different builds report the same
+        // string.  `build.uuid` is the LC_UUID of the code MAPPED INTO THIS PROCESS,
+        // so it changes with the code and cannot be changed by overwriting the file on disk.
+        // Compare it with `dwarfdump --uuid` on the installed dylib: a disagreement means the file
+        // was replaced and the app was never relaunched, which nothing else in the product could
+        // report.  ⚠️ null where the platform has no Mach-O LC_UUID -- never a substitute value.
+        {"serverInfo",
+         {{"name", kServerName},
+          {"version", kServerVersion},
+          {"build",
+           {{"uuid", ::reaper_mcp::loadedImageUuid().empty()
+                         ? Json(nullptr)
+                         : Json(::reaper_mcp::loadedImageUuid())},
+            {"uuidSource", ::reaper_mcp::loadedImageUuidMethod()},
+            {"compiledAt", ::reaper_mcp::buildCompiledAt()}}}}},
         {"instructions",
          "REAPER control via MCP. Read-only tools (transport.get_state, project.get_summary, "
          "track.list, track.get_name) are safe to call freely; mutating tools are single-undo. "

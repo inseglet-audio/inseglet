@@ -30,6 +30,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -263,15 +264,43 @@ inline std::vector<std::vector<double>> truePeakPolyphase() {
     return ph;
 }
 
-// The maximum of |x| over the input samples AND over all four interpolated phases. The input sample
-// is kept as a floor on purpose: the table alone reads a sample-aligned peak up to ~0.22 dB BELOW the
-// sample (its nearest evaluation point is 1/8 sample away, and its outer phases sit at -0.02 dB at
-// fs/4), and a true peak reported below the sample peak is not a reading anyone should act on.
-inline double truePeakDb(const AudioBuffer& buf, int ch) {
+// The edge guard, in SAMPLES, excluded at EACH end by truePeakDbInterior below.
+//
+// ⛔ SIX, AND IT IS DERIVED FROM THE FILTER RATHER THAN SWEPT.  An output at position i reads
+//    idx = i + (t - half + 1) for t in [0, taps), i.e. i-5 .. i+6.  Zero-padding therefore reaches
+//    positions 0..4 at the head and the last SIX positions at the tail, so 6 is the smallest guard
+//    that covers every position the padding can touch -- AT ANY BUFFER LENGTH, FOR ANY SIGNAL.
+//    Change the table and this constant follows it: kTruePeakEdgeGuard IS kTruePeakTaps / 2, and
+//    truePeakLinearOver ASSERTS the table really has that many taps, so the two cannot drift.
+//
+// ⛔ AND IT CONTRADICTS DOC 266's CORRECTION 1, WHICH SAID "the guard must be 2, not 8".
+//    That figure came from sweeping ONE synthetic sine of period 8 samples, whose ring happens to
+//    collapse within two positions.  Doc 267 measured the residual THROUGH THE PRODUCT on real
+//    material (~439.5 Hz, period ~109 samples) across eight 1 ms window positions and read:
+//        guard 2 -> +0.115617 dB of the artefact LEFT BEHIND    guard 4 -> +0.041171
+//        guard 5, 6, 7, 8 -> +0.000000
+//    ⇒ a guard of 2 SHIPS THE DEFECT IT WAS ADDED TO DISCLOSE, on ordinary material.  Doc 265's
+//    "generous 8" was closer to right than the beat that corrected it, and the derivation above
+//    is why 6 rather than 8: 8 is a round number, 6 is the tap geometry.
+//
+// ⛔ IT IS A CONSTANT AND NOT A PARAMETER, on purpose: a flag that changes what "true peak" means
+//    is that same class of defect waiting to happen.
+inline constexpr int kTruePeakTaps      = 12;   // ITU-R BS.1770-4 Annex 2, per phase
+inline constexpr int kTruePeakEdgeGuard = kTruePeakTaps / 2;
+
+// The maximum of |x| AND of all four interpolated phases, taken over OUTPUT POSITIONS [lo, hi).
+// ⛔ THE TAPS STILL REACH OUTSIDE [lo, hi) AND OUTSIDE THE BUFFER.  Restricting the range does not
+//    change the filter; it declines to REPORT the filter's output where the filter was fed zeros
+//    that are not in the signal.  That is the whole content of an "edge guard".
+inline double truePeakLinearOver(const AudioBuffer& buf, int ch, size_t lo, size_t hi) {
     static const std::vector<std::vector<double>> ph = truePeakPolyphase();
     const int OS = 4, taps = (int)ph[0].size(), half = taps / 2;
+    // The guard constant is derived from the tap count; if the table ever changes shape, the guard
+    // is silently wrong.  This is the only place both are visible, so this is where it is checked.
+    static_assert(kTruePeakEdgeGuard == kTruePeakTaps / 2, "guard must stay taps/2");
+    assert(taps == kTruePeakTaps);
     double peak = 0.0;
-    for (size_t i = 0; i < buf.frames; ++i) {
+    for (size_t i = lo; i < hi; ++i) {
         double s0 = std::fabs((double)buf.at(i, ch));
         if (s0 > peak) peak = s0;
         for (int p = 0; p < OS; ++p) {
@@ -285,7 +314,47 @@ inline double truePeakDb(const AudioBuffer& buf, int ch) {
             if (a > peak) peak = a;
         }
     }
-    return linToDb(peak);
+    return peak;
+}
+
+// The maximum of |x| over the input samples AND over all four interpolated phases. The input sample
+// is kept as a floor on purpose: the table alone reads a sample-aligned peak up to ~0.22 dB BELOW the
+// sample (its nearest evaluation point is 1/8 sample away, and its outer phases sit at -0.02 dB at
+// fs/4), and a true peak reported below the sample peak is not a reading anyone should act on.
+// ⛔ UNCHANGED BY DOC 267.  It is the whole-buffer maximum, it stays the whole-buffer maximum, and
+//    the number published in 1.17.0 does not move.  That is exactly what is forbidden here.
+inline double truePeakDb(const AudioBuffer& buf, int ch) {
+    return linToDb(truePeakLinearOver(buf, ch, 0, buf.frames));
+}
+
+// THE SAME MAXIMUM WITH kTruePeakEdgeGuard SAMPLES EXCLUDED AT BOTH ENDS.
+//
+// WHY IT EXISTS.  The 12-tap polyphase interpolator is fed ZEROS outside the buffer, and a buffer
+//   whose first or last sample is non-zero therefore presents the filter with a step it must ring
+//   at.  That ring is REAL for a rendered file -- silence genuinely precedes its first sample at
+//   every listener's DAC -- so truePeakDb must keep reporting it.  But `analysis.meter` renders
+//   startPos->endPos, so EVERY meter call has two raw edges wherever the user put them, and on
+//   ordinary material the reported true peak moves by up to 0.94 dB with the window (measured
+//   arm B, measured on the running server).  Two numbers that disagree say "the peak is at an
+//   edge"; one number cannot.
+//
+// ⛔ A GUARDED POSITION IS SKIPPED ENTIRELY -- its interpolated phases AND its raw sample.  The
+//   alternative (keep the sample floor over the whole buffer, guard only the phases) is defensible
+//   and was REJECTED for one reason: THIS one is what was measured, and shipping the other would make
+//   its "2 samples suffices" a claim about a different quantity.
+// ⚠️ THE PRICE, STATED RATHER THAN LEFT TO BE FOUND: this number is NOT bounded below by the sample
+//   peak.  A lone full-scale sample at index 0 reads samplePeak +0.000000 and an interior tens of
+//   dB below it.  The invariant truePeakDb carries does NOT transfer, and the unit suite asserts
+//   the gap ON PURPOSE so nobody "fixes" the field into breaking the definition.
+// ⛔ RETURNS false, AND WRITES NOTHING, when the buffer has no interior at all (frames <= 2*guard).
+//   A floor value there would look like a reading, and an absence is stated rather than floored.
+inline bool truePeakDbInterior(const AudioBuffer& buf, int ch, double& outDb,
+                               int guard = kTruePeakEdgeGuard) {
+    if (guard < 0) return false;
+    const size_t g = (size_t)guard;
+    if (buf.frames <= 2 * g) return false;
+    outDb = linToDb(truePeakLinearOver(buf, ch, g, buf.frames - g));
+    return true;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -297,6 +366,18 @@ struct ChannelMetrics {
     double peakDb = kMinDb();
     double truePeakDb = kMinDb();
     double kLevelLkfs = kMinDb();  // ungated K-weighted level (per-channel loudness contribution)
+
+    // ---- The edge-guard reading, beside the number it explains. ----
+    // truePeakDbInterior is the SAME maximum with kTruePeakEdgeGuard samples excluded at BOTH ends.
+    // interiorValid is false when the buffer is too short to HAVE an interior (frames <= 2*guard);
+    //   the payload reports null there rather than a floor value that would look like a reading.
+    // edgeDominated is true when the whole-buffer maximum is attained ONLY inside a guard region,
+    //   i.e. truePeakDb > truePeakDbInterior.  ⚠️ A TIE READS false ON PURPOSE: if the same level
+    //   also occurs in the interior, the reported peak is not an edge artefact and nothing is
+    //   hidden by saying so.
+    double truePeakDbInterior = kMinDb();
+    bool   truePeakInteriorValid = false;
+    bool   truePeakEdgeDominated = false;
 };
 
 inline ChannelMetrics analyzeChannel(const AudioBuffer& buf, int ch) {
@@ -313,6 +394,12 @@ inline ChannelMetrics analyzeChannel(const AudioBuffer& buf, int ch) {
     m.rmsDb = powToDb(ms);
     m.peakDb = linToDb(peak);
     m.truePeakDb = truePeakDb(buf, ch);
+    double interior = kMinDb();
+    m.truePeakInteriorValid = truePeakDbInterior(buf, ch, interior);
+    if (m.truePeakInteriorValid) {
+        m.truePeakDbInterior = interior;
+        m.truePeakEdgeDominated = (m.truePeakDb > interior);
+    }
     double kms = kWeightedMeanSquare(buf, ch);
     m.kLevelLkfs = kms > 0.0 ? (-0.691 + 10.0 * std::log10(kms)) : kMinDb();
     return m;

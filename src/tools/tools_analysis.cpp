@@ -92,6 +92,26 @@ inline bool buildStereoDownmixMatrix(int nch, bool includeLfe,
 
 // Round for compact JSON series (0.01 precision keeps a timeline payload readable).
 inline double r2(double v) { return std::round(v * 100.0) / 100.0; }
+// ---- THE EDGE-GUARD PAIR, EMITTED THE SAME WAY EVERYWHERE IT IS REPORTED. ----
+// ⛔ WHY THESE EXIST AT ALL.  1.17.0 put `truePeakDbInterior` / `truePeakEdgeDominated` into
+//    `analysis.meter` because that is the tool its measurements called.  SEVEN OTHER TOOLS IN THIS
+//    FILE report a `truePeakDb` computed over a bounded window whose edges are just as raw --
+//    the interpolator is fed zeros outside whatever range was asked for, whichever read path
+//    asked -- so seven payloads carried a number this project already knew was incomplete.
+// ⚠️ ITEM 181's ROW NAMES TWO OF THEM.  It was written from what its author had looked at; the
+//    seven were counted by grepping the emission sites, and the scope was corrected
+//    rather than quietly implemented wider than it says.
+// ⛔ VALIDITY IS A PROPERTY OF THE BUFFER, NOT OF THE CHANNEL: truePeakDbInterior fails only when
+//    frames <= 2*guard, which is the same for every channel of one buffer.  An aggregate over
+//    channels is therefore valid exactly when the buffer has an interior at all, and null -- never
+//    a floor value -- when it does not: an absence is stated, never floored.
+// ⚠️ AND THE AGGREGATE IS A MAX OF INTERIORS, NOT THE INTERIOR OF A MAX.  Where a tool reports one
+//    true peak across N channels, its companion is max_c(interior_c); edgeDominated then compares
+//    two maxima taken the same way.  A TIE READS false, exactly as in analysis.meter.
+inline Json tpiJson(bool valid, double v) { return valid ? Json(v) : Json(nullptr); }
+inline Json tpiJson2(bool valid, double v) { return valid ? Json(r2(v)) : Json(nullptr); }
+inline Json tpEdgeJson(bool valid, bool dominated) { return valid ? Json(dominated) : Json(nullptr); }
+
 // Finer rounding for raw sample-domain values (DC offset, waveform overview min/max in [-1,1]).
 inline double r4(double v) { return std::round(v * 10000.0) / 10000.0; }
 
@@ -775,6 +795,21 @@ void registerAnalysisTools(ToolRegistry& reg) {
         "from the project, REAPER is resampling and a warning says where to fix it. Pass "
         "renderRate:\"follow\" to make the render follow the audio engine (and therefore the "
         "audio device) instead, or a number to force a specific rate. "
+        "Per-channel truePeakDb is the maximum over the WHOLE rendered window, and it is reported "
+        "beside truePeakDbInterior, the same maximum with truePeakEdgeGuardSamples excluded at BOTH "
+        "ends, and truePeakEdgeDominated, which is true when the whole-window maximum comes ONLY "
+        "from inside those guards. WHY BOTH NUMBERS: the oversampling interpolator is fed zeros "
+        "outside the window, so a window whose first or last sample is non-zero presents it with a "
+        "step it rings at. For a rendered FILE that ring is real - silence genuinely precedes the "
+        "first sample at the listener's DAC - so truePeakDb keeps reporting it. But this tool "
+        "renders startPos to endPos, so EVERY call has two raw edges wherever you put them, and the "
+        "reported true peak MOVES when you move the window: measured at up to 0.94 dB on one steady "
+        "tone. When truePeakEdgeDominated is true, the peak is at a window boundary and "
+        "truePeakDbInterior is what the material itself contains. truePeakDbInterior is null when "
+        "the window is too short to have an interior, and it is NOT bounded below by the sample "
+        "peak - a guarded position is excluded entirely, sample and all. Note that render bounds "
+        "snap to a grid (1 ms at 48 kHz), so a window cannot be nudged by single samples to test a "
+        "suspicious reading. "
         "Runs ONE bounded, non-destructive analysis render "
         "(snapshots + restores every RENDER_* field + selection; the temp file is deleted after "
         "reading) using the measure-don't-limit config, so a headroomed master is measured exactly. "
@@ -795,6 +830,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "target":{"type":"string"},"channels":{"type":"integer"},"layout":{"type":"string"},
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
             "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
+            "truePeakEdgeGuardSamples":{"type":"integer"},"window":{"type":"object"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "plan":{"type":"string"},"dryRun":{"type":"boolean"},
@@ -888,6 +924,20 @@ void registerAnalysisTools(ToolRegistry& reg) {
             Json renderSilence = Json{{"allZero", sil.allZero}, {"channels", sil.channels},
                                       {"zeroChannels", sil.zeroChannels},
                                       {"frames", (double)tr.buf.frames}};
+            // ---- THE WINDOW THIS CALL ACTUALLY GOT ------------------------------------
+            // ⛔ HOISTED OUT OF THE SILENCE BRANCH, WHERE IT WAS DERIVED FOR A DIFFERENT REASON.
+            //    these three were computed to keep the cross-read comparison honest; the same
+            //    three answer the window question, and deriving them twice would be a hand-maintained
+            //    duplicate.  The silence branch below now USES them instead of
+            //    re-declaring them.
+            const bool haveCustomWindow =
+                (boundsFlag == 0 && a.contains("startPos") && a["startPos"].is_number() &&
+                 a.contains("endPos") && a["endPos"].is_number() &&
+                 a["endPos"].get<double>() > a["startPos"].get<double>());
+            const double winStart = haveCustomWindow ? a["startPos"].get<double>() : 0.0;
+            const double winDur = haveCustomWindow
+                ? a["endPos"].get<double>() - a["startPos"].get<double>() : 0.0;
+
             Json crossRead = Json{{"available", false},
                                   {"reason", "not attempted — the render carries content, so there "
                                              "is nothing to disambiguate"},
@@ -911,13 +961,8 @@ void registerAnalysisTools(ToolRegistry& reg) {
                 // two-path DISAGREEMENT IT HAD MANUFACTURED.  A refusal is only earned when both
                 // paths were asked the SAME question, so the window is derived here and a
                 // MISMATCH DOWNGRADES THE REFUSAL TO A REPORT -- it never silently compares.
-                const bool haveCustomWindow =
-                    (boundsFlag == 0 && a.contains("startPos") && a["startPos"].is_number() &&
-                     a.contains("endPos") && a["endPos"].is_number() &&
-                     a["endPos"].get<double>() > a["startPos"].get<double>());
-                const double winStart = haveCustomWindow ? a["startPos"].get<double>() : 0.0;
-                const double winDur = haveCustomWindow
-                    ? a["endPos"].get<double>() - a["startPos"].get<double>() : 0.0;
+                // (haveCustomWindow / winStart / winDur are derived ONCE above -- the same
+                //  three values the cross-read comparison needs here.)
                 if (targetIsTrack) {
                     // ⚠️ THE INDEPENDENT READ PATH (measured in BOTH directions: Δ = 0.0
                     // against the alive regime on a provably dead render).  It reads
@@ -1073,7 +1118,18 @@ void registerAnalysisTools(ToolRegistry& reg) {
                     {"label", c < (int)labels.size() ? labels[c] : ("ch" + std::to_string(c))},
                     {"isLFE", bedChannelIsLFE(nc, c)},
                     {"rmsDb", m.rmsDb}, {"peakDb", m.peakDb},
-                    {"truePeakDb", m.truePeakDb}, {"kLevelLkfs", m.kLevelLkfs}});
+                    {"truePeakDb", m.truePeakDb}, {"kLevelLkfs", m.kLevelLkfs},
+                    // ---- the edge-guard reading ----
+                    // truePeakDb stays the WHOLE-BUFFER maximum and its value has not moved.
+                    // These two say whether that maximum came from the window's own raw edges:
+                    // this tool renders startPos->endPos, so every call has two of them wherever
+                    // the caller put them, and on ordinary material the reported true peak moves
+                    // by up to ~0.94 dB with the window (measured on a running server).
+                    // null interior == the window is too short to have one (<= 2*guard frames).
+                    {"truePeakDbInterior", m.truePeakInteriorValid ? Json(m.truePeakDbInterior)
+                                                                   : Json(nullptr)},
+                    {"truePeakEdgeDominated", m.truePeakInteriorValid
+                                                  ? Json(m.truePeakEdgeDominated) : Json(nullptr)}});
             }
 
             Json downmix = Json::object();
@@ -1196,9 +1252,67 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                       "comparable - this is an absence, not a disagreement";
             }
 
+            // ---- THE WINDOW BLOCK ---------------------------------------------------
+            // ⛔ WHAT THIS IS FOR.  This tool's render bounds are QUANTISED: asking for
+            //    windows longer by k samples and read k = 1, 2, 7, 13, 47 -> 48000 frames while
+            //    k = 48 -> 48048.  Nothing in the payload said so.  That interacts badly with
+            //    the edge guard: the edge ring moves truePeakDb by up to ~0.94 dB, so a user who sees a
+            //    suspicious reading CANNOT nudge the window by a sample to check -- the boundary
+            //    causing the artefact was not addressable and its unaddressability was invisible.
+            // ⭐ WHAT IS REPORTED, AND WHAT IS DELIBERATELY NOT.  This block reports what was
+            //    ASKED FOR beside what was ACTUALLY RENDERED, and the difference in samples.  It
+            //    does NOT state a grid constant.  48 samples is a READING AT 48 kHz, NOT A LAW
+            //    and baking it in would be the defect this project names most often: a figure
+            //    asserted where it could be measured.  A caller who wants the quantum measures it
+            //    the way it was first measured -- ask for k more samples until renderedFrames MOVES -- and
+            //    every call now carries the two numbers that make that possible.
+            // ⚠️ THE COMPARISON EXISTS ONLY FOR A CUSTOM WINDOW.  With boundsFlag != 0 there is no
+            //    requested duration to compare against, so snapped/snapDeltaSamples are null with
+            //    a stated reason rather than a 0 that would read as "nothing was snapped".
+            Json window = Json::object();
+            window["boundsFlag"] = boundsFlag;
+            window["requestedCustom"] = haveCustomWindow;
+            window["requestedStartSec"] = haveCustomWindow ? Json(winStart) : Json(nullptr);
+            window["requestedDurSec"] = haveCustomWindow ? Json(winDur) : Json(nullptr);
+            window["renderedFrames"] = (double)tr.buf.frames;
+            window["renderedDurSec"] =
+                rateKnown ? Json((double)tr.buf.frames / renderedRate) : Json(nullptr);
+            if (haveCustomWindow && rateKnown) {
+                const long long reqFrames = (long long)(winDur * renderedRate + 0.5);
+                const long long gotFrames = (long long)tr.buf.frames;
+                window["requestedFramesAtRenderedRate"] = (double)reqFrames;
+                window["snapDeltaSamples"] = (double)(gotFrames - reqFrames);
+                window["snapped"] = (gotFrames != reqFrames);
+                if (gotFrames != reqFrames)
+                    warnings.push_back(
+                        "the render was BOUNDED to " + std::to_string(gotFrames) +
+                        " frames where " + std::to_string(reqFrames) + " were asked for (" +
+                        std::to_string(gotFrames - reqFrames) + " samples): REAPER quantises "
+                        "render bounds, so this reading describes a window slightly different "
+                        "from the one requested. Every figure in this payload -- truePeakDb above "
+                        "all, which moves with the window's edges -- is about the RENDERED "
+                        "window.");
+            } else {
+                window["requestedFramesAtRenderedRate"] = Json(nullptr);
+                window["snapDeltaSamples"] = Json(nullptr);
+                window["snapped"] = Json(nullptr);
+                window["snapReason"] =
+                    haveCustomWindow
+                        ? "the rendered sample rate is unknown, so a requested DURATION cannot be "
+                          "converted to frames - this is an absence, not agreement"
+                        : "no custom startPos/endPos was given, so there is no requested duration "
+                          "to compare the rendered one against - this is an absence, not agreement";
+            }
+            window["note"] =
+                "requested vs rendered, reported so the quantisation is VISIBLE. No grid constant "
+                "is stated here: measure it by asking for k more samples until renderedFrames "
+                "moves.";   // ⛔ NO INTERNAL REFERENCE IN A SHIPPED STRING (the string gate caught
+                            //    one here, twice -- once per slice of the universal binary).
+
             return Json{{"target", targetLabel}, {"channels", nc}, {"layout", bedLayoutName(nc)},
-                        {"boundsFlag", boundsFlag}, {"program", program},
+                        {"boundsFlag", boundsFlag}, {"program", program}, {"window", window},
                         {"channelsDetail", chDetail}, {"downmix", downmix},
+                        {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
                         {"measuredSource", "render+samples"}, {"rate", rate},
                         {"renderSilence", renderSilence}, {"crossRead", crossRead},
                         {"rawStats", f0.contains("stats") ? f0["stats"] : Json::object()},
@@ -1500,11 +1614,16 @@ void registerAnalysisTools(ToolRegistry& reg) {
                 w.resize((size_t)buf.channels, 1.0);   // padded channels are silent — weight harmless
                 meter::GatedLoudness g = meter::gatedLoudness(buf, w);
                 double tp = meter::kMinDb(), sp = meter::kMinDb();
+                double tpi = meter::kMinDb(); bool tpiOk = false;   // the interior companion
                 const int usech = std::min(stems[i].channels, buf.channels);
                 for (int c = 0; c < usech; ++c) {
                     meter::ChannelMetrics cm = meter::analyzeChannel(buf, c);
                     if (cm.truePeakDb > tp) tp = cm.truePeakDb;
                     if (cm.peakDb > sp) sp = cm.peakDb;
+                    if (cm.truePeakInteriorValid) {
+                        tpiOk = true;
+                        if (cm.truePeakDbInterior > tpi) tpi = cm.truePeakDbInterior;
+                    }
                 }
                 lufsPer[i] = g.integratedLufs;
                 if (g.integratedLufs > bestLufs) { bestLufs = g.integratedLufs; bestIdx = (int)i; }
@@ -1513,7 +1632,9 @@ void registerAnalysisTools(ToolRegistry& reg) {
                     {"channels", stems[i].channels}, {"layout", bedLayoutName(stems[i].channels)},
                     {"lufsIntegrated", r2(g.integratedLufs)}, {"ungatedLufs", r2(g.ungatedLufs)},
                     {"activityFraction", r2(g.activityFraction)},
-                    {"truePeakDb", r2(tp)}, {"samplePeakDb", r2(sp)}});
+                    {"truePeakDb", r2(tp)}, {"samplePeakDb", r2(sp)},
+                    {"truePeakDbInterior", tpiJson2(tpiOk, tpi)},
+                    {"truePeakEdgeDominated", tpEdgeJson(tpiOk, tp > tpi)}});
             }
             // Balance: each stem vs the loudest.
             for (auto& sj : stemJson) {
@@ -1526,7 +1647,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                {"label", stems[(size_t)bestIdx].label},
                                {"lufsIntegrated", r2(bestLufs)}};
             return Json{{"stems", stemJson}, {"loudest", loudest}, {"count", (int)stemJson.size()},
-                        {"boundsFlag", boundsFlag},
+                        {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"warnings", warnings}};
 #else
@@ -1635,10 +1756,15 @@ void registerAnalysisTools(ToolRegistry& reg) {
             dw.resize((size_t)dr.buf.channels, 1.0);
             meter::GatedLoudness dg = meter::gatedLoudness(dr.buf, dw);
             double dtp = meter::kMinDb();
+            double dtpi = meter::kMinDb(); bool dtpiOk = false;     // the interior companion
             const int usech = std::min(dlg.channels, dr.buf.channels);
             for (int c = 0; c < usech; ++c) {
                 meter::ChannelMetrics cm = meter::analyzeChannel(dr.buf, c);
                 if (cm.truePeakDb > dtp) dtp = cm.truePeakDb;
+                if (cm.truePeakInteriorValid) {
+                    dtpiOk = true;
+                    if (cm.truePeakDbInterior > dtpi) dtpi = cm.truePeakDbInterior;
+                }
             }
             const bool dialogSilent = !dg.valid || dg.integratedLufs <= meter::kMinDb() + 1.0;
             if (dialogSilent)
@@ -1650,6 +1776,8 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                {"ungatedLufs", r2(dg.ungatedLufs)},
                                {"activityFraction", r2(dg.activityFraction)},
                                {"truePeakDb", r2(dtp)},
+                               {"truePeakDbInterior", tpiJson2(dtpiOk, dtpi)},
+                               {"truePeakEdgeDominated", tpEdgeJson(dtpiOk, dtp > dtpi)},
                                {"source", "c++ bs1770 gated on the isolated stem"}};
 
             Json offset = Json(nullptr);
@@ -1668,7 +1796,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"method", "dialog level = BS.1770-4 gated loudness of the ISOLATED dialog "
                                    "stem (gates drop inter-phrase silence). Approximation is honest "
                                    "only if the stem carries dialog exclusively."},
-                        {"boundsFlag", boundsFlag},
+                        {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
                         {"measuredSource", "render-stats + render+samples"},
                         {"warnings", warnings}};
 #else
@@ -1757,9 +1885,14 @@ void registerAnalysisTools(ToolRegistry& reg) {
             w.resize((size_t)tr.buf.channels, 1.0);
             meter::GatedLoudness gm = meter::gatedLoudness(tr.buf, w);
             double mtp = meter::kMinDb();
+            double mtpi = meter::kMinDb(); bool mtpiOk = false;     // the interior companion
             for (int c = 0; c < nc; ++c) {
                 meter::ChannelMetrics cm = meter::analyzeChannel(tr.buf, c);
                 if (cm.truePeakDb > mtp) mtp = cm.truePeakDb;
+                if (cm.truePeakInteriorValid) {
+                    mtpiOk = true;
+                    if (cm.truePeakDbInterior > mtpi) mtpi = cm.truePeakDbInterior;
+                }
             }
 
             // Stereo fold.
@@ -1792,16 +1925,30 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"layout", bedLayoutName(ti.channels)}, {"includeLfe", includeLfe},
                         {"coefficients", coefficients},
                         {"multichannel", Json{{"lufsIntegrated", r2(gm.integratedLufs)},
-                                              {"truePeakDb", r2(mtp)}}},
+                                              {"truePeakDb", r2(mtp)},
+                                              {"truePeakDbInterior", tpiJson2(mtpiOk, mtpi)},
+                                              {"truePeakEdgeDominated",
+                                               tpEdgeJson(mtpiOk, mtp > mtpi)}}},
                         {"stereo", Json{{"lufsIntegrated", r2(gs.integratedLufs)},
                                         {"truePeakDbLo", r2(lo.truePeakDb)},
                                         {"truePeakDbRo", r2(ro.truePeakDb)},
+                                        {"truePeakDbLoInterior",
+                                         tpiJson2(lo.truePeakInteriorValid, lo.truePeakDbInterior)},
+                                        {"truePeakDbRoInterior",
+                                         tpiJson2(ro.truePeakInteriorValid, ro.truePeakDbInterior)},
+                                        {"truePeakEdgeDominated",
+                                         tpEdgeJson(lo.truePeakInteriorValid || ro.truePeakInteriorValid,
+                                                    lo.truePeakEdgeDominated || ro.truePeakEdgeDominated)},
                                         {"correlation", r2(corr)}}},
                         {"mono", Json{{"lufsIntegrated", r2(gmo.integratedLufs)},
-                                      {"truePeakDb", r2(mm.truePeakDb)}}},
+                                      {"truePeakDb", r2(mm.truePeakDb)},
+                                      {"truePeakDbInterior",
+                                       tpiJson2(mm.truePeakInteriorValid, mm.truePeakDbInterior)},
+                                      {"truePeakEdgeDominated",
+                                       tpEdgeJson(mm.truePeakInteriorValid, mm.truePeakEdgeDominated)}}},
                         {"deltas", Json{{"stereoVsMultichannelLu", r2(stereoVsMulti)},
                                         {"monoVsStereoLu", r2(monoVsStereo)}}},
-                        {"interpretation", interp}, {"boundsFlag", boundsFlag},
+                        {"interpretation", interp}, {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"warnings", warnings}};
 #else
@@ -2054,6 +2201,9 @@ void registerAnalysisTools(ToolRegistry& reg) {
             std::vector<double> ungatedPow(objs.size(), 0.0);
             std::vector<meter::GatedLoudness> gl(objs.size());
             std::vector<double> tpv(objs.size(), meter::kMinDb()), spv(objs.size(), meter::kMinDb());
+            // The interior companion, one per object, valid per BUFFER.
+            std::vector<double> tpiv(objs.size(), meter::kMinDb());
+            std::vector<char> tpivOk(objs.size(), 0);
             double bestLufs = meter::kMinDb(); int bestIdx = -1; double totPow = 0.0;
             for (size_t i = 0; i < objs.size(); ++i) {
                 if (!mr.haveBuf[i]) {
@@ -2070,6 +2220,10 @@ void registerAnalysisTools(ToolRegistry& reg) {
                     meter::ChannelMetrics cm = meter::analyzeChannel(buf, c);
                     if (cm.truePeakDb > tpv[i]) tpv[i] = cm.truePeakDb;
                     if (cm.peakDb > spv[i]) spv[i] = cm.peakDb;
+                    if (cm.truePeakInteriorValid) {
+                        tpivOk[i] = 1;
+                        if (cm.truePeakDbInterior > tpiv[i]) tpiv[i] = cm.truePeakDbInterior;
+                    }
                 }
                 if (gl[i].ungatedLufs > meter::kMinDb() + 1.0)
                     ungatedPow[i] = std::pow(10.0, (gl[i].ungatedLufs + 0.691) / 10.0);
@@ -2090,6 +2244,9 @@ void registerAnalysisTools(ToolRegistry& reg) {
                     {"ungatedLufs", r2(gl[i].ungatedLufs)},
                     {"activityFraction", r2(gl[i].activityFraction)},
                     {"truePeakDb", r2(tpv[i])}, {"samplePeakDb", r2(spv[i])},
+                    {"truePeakDbInterior", tpiJson2(tpivOk[i] != 0, tpiv[i])},
+                    {"truePeakEdgeDominated",
+                     tpEdgeJson(tpivOk[i] != 0, tpv[i] > tpiv[i])},
                     {"energyShare", r2(share)},
                     {"deltaFromLoudestLu", r2(gl[i].integratedLufs - bestLufs)},
                     {"position", pos}});
@@ -2129,7 +2286,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
 
             return Json{{"objects", objJson}, {"loudest", loudest}, {"count", (int)objJson.size()},
                         {"bed", bedJson}, {"bedVsObjects", bedVsObjects},
-                        {"boundsFlag", boundsFlag},
+                        {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"interpretation", interp}, {"warnings", warnings}};
 #else
@@ -2268,14 +2425,22 @@ void registerAnalysisTools(ToolRegistry& reg) {
             return Json{{"target", ti.label}, {"channels", ti.channels}, {"program", program},
                         {"left", Json{{"rmsDb", r2(lm.rmsDb)}, {"peakDb", r2(lm.peakDb)},
                                       {"truePeakDb", r2(lm.truePeakDb)},
+                                      {"truePeakDbInterior",
+                                       tpiJson2(lm.truePeakInteriorValid, lm.truePeakDbInterior)},
+                                      {"truePeakEdgeDominated",
+                                       tpEdgeJson(lm.truePeakInteriorValid, lm.truePeakEdgeDominated)},
                                       {"kLevelLkfs", r2(lm.kLevelLkfs)}}},
                         {"right", Json{{"rmsDb", r2(rm.rmsDb)}, {"peakDb", r2(rm.peakDb)},
                                        {"truePeakDb", r2(rm.truePeakDb)},
+                                       {"truePeakDbInterior",
+                                        tpiJson2(rm.truePeakInteriorValid, rm.truePeakDbInterior)},
+                                       {"truePeakEdgeDominated",
+                                        tpEdgeJson(rm.truePeakInteriorValid, rm.truePeakEdgeDominated)},
                                        {"kLevelLkfs", r2(rm.kLevelLkfs)}}},
                         {"interAuralBalanceDb", r2(balance)}, {"correlation", r2(corr)},
                         {"midSide", Json{{"midRmsDb", r2(mm.rmsDb)}, {"sideRmsDb", r2(sm.rmsDb)},
                                          {"sideToMidDb", r2(sideToMid)}}},
-                        {"interpretation", interp}, {"boundsFlag", boundsFlag},
+                        {"interpretation", interp}, {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
                         {"measuredSource", "render-stats + render+samples"},
                         {"warnings", warnings}};
 #else
@@ -2720,12 +2885,17 @@ void registerAnalysisTools(ToolRegistry& reg) {
                     {"isLFE", bedChannelIsLFE(nc, c)},
                     {"peakDb", r2(m.peakDb)}, {"rmsDb", r2(m.rmsDb)},
                     {"truePeakDb", r2(m.truePeakDb)}, {"kLevelLkfs", r2(m.kLevelLkfs)},
+                    {"truePeakDbInterior",
+                     tpiJson2(m.truePeakInteriorValid, m.truePeakDbInterior)},
+                    {"truePeakEdgeDominated",
+                     tpEdgeJson(m.truePeakInteriorValid, m.truePeakEdgeDominated)},
                     {"dcOffset", r4(meter::channelDcOffset(r.buf, c))},
                     {"clipCount", (double)meter::channelClipCount(r.buf, c, clipThr)}});
             }
             Json out = accWindowBlock(r);
             out["target"] = t.label; out["source"] = t.source;
             out["channelsDetail"] = chDetail;
+            out["truePeakEdgeGuardSamples"] = meter::kTruePeakEdgeGuard;   // the width used
             out["measuredSource"] = "accessor";
             if (optBool(a, "overview", false)) {
                 const int buckets = optInt(a, "overviewBuckets", 512);
@@ -2811,7 +2981,11 @@ void registerAnalysisTools(ToolRegistry& reg) {
                     {"label", c < (int)labels.size() ? labels[c] : ("ch" + std::to_string(c))},
                     {"isLFE", bedChannelIsLFE(nc, c)},
                     {"rmsDb", r2(m.rmsDb)}, {"peakDb", r2(m.peakDb)},
-                    {"truePeakDb", r2(m.truePeakDb)}, {"kLevelLkfs", r2(m.kLevelLkfs)}});
+                    {"truePeakDb", r2(m.truePeakDb)}, {"kLevelLkfs", r2(m.kLevelLkfs)},
+                    {"truePeakDbInterior",
+                     tpiJson2(m.truePeakInteriorValid, m.truePeakDbInterior)},
+                    {"truePeakEdgeDominated",
+                     tpEdgeJson(m.truePeakInteriorValid, m.truePeakEdgeDominated)}});
             }
             Json downmix = Json::object();
             if (nc >= 2) {
@@ -2833,6 +3007,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             Json out = accWindowBlock(r);
             out["target"] = t.label; out["source"] = t.source; out["layout"] = bedLayoutName(nc);
             out["loudness"] = loudness; out["channelsDetail"] = chDetail; out["downmix"] = downmix;
+            out["truePeakEdgeGuardSamples"] = meter::kTruePeakEdgeGuard;   // the width used
             out["measuredSource"] = "accessor";
             Json warnings = Json::array();
             if (!t.isTake)
@@ -3505,6 +3680,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "target":{"type":"string"},"channels":{"type":"integer"},"layout":{"type":"string"},
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
             "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
+            "truePeakEdgeGuardSamples":{"type":"integer"},"window":{"type":"object"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "revive":{"type":"object"},"beforeRevive":{"type":"object"},

@@ -19,6 +19,36 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.18.0" author="James Livingston" time="2026-09-04T00:32:38Z">
+        <changelog><![CDATA[Every true-peak reading now says whether it came from the edge of the window you asked for, and the meter reports the window it actually rendered.
+
+A true peak is measured by reconstructing what sits BETWEEN your samples. At the two ends of any
+window that reconstruction has nothing to reach into, so the filter rings against the silence
+outside -- and the number you get can sit up to about 0.9 dB above what the material contains,
+purely because of where you put the window. Version 1.17.0 disclosed that in `analysis.meter`.
+
+WHAT CHANGES.
+
+Every tool that reports a true peak now discloses it. `analysis.read_samples`,
+`analysis.accessor_meter`, `analysis.stem_loudness`, `analysis.dialog_loudness`,
+`analysis.downmix_check`, `analysis.object_loudness` and `analysis.binaural_check` each report
+`truePeakDbInterior` -- the same maximum with both window edges excluded -- and
+`truePeakEdgeDominated`, true when the peak came ONLY from an edge, beside the `truePeakDb` they
+already reported. `truePeakDb` itself is unchanged: measured on two builds over the same calls, it
+moved by 0.000000 dB on every one. On a steady tone read through the accessor path, the reported
+true peak moves 0.70 dB across 24 one-sample window offsets while the interior figure moves 0.05.
+
+`analysis.meter` now reports the window it actually rendered. REAPER quantises render bounds, so a
+window asked for in samples may not be the window measured. The new `window` block reports what was
+requested beside what was rendered, the difference in samples, and a `snapped` flag, and warns when
+they differ. No grid size is asserted: ask for a few more samples and watch `renderedFrames` move.
+
+The server now says which build is answering. `initialize`'s `serverInfo.build.uuid` is the
+identity of the code actually running, not of the file on disk, so replacing the plug-in without
+restarting REAPER is now visible instead of silent. The discovery file carries it too.
+]]></changelog>
+        <source main="main" file="reaper_mcp.dylib" platform="darwin">https://github.com/inseglet-audio/inseglet/releases/download/v1.18.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.17.0" author="James Livingston" time="2026-09-03T03:12:46Z">
         <changelog><![CDATA[The true-peak meter now uses the interpolation filter ITU-R BS.1770-4 publishes, and keeps the sample peak as a floor.
 

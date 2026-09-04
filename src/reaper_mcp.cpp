@@ -41,6 +41,7 @@
 #endif
 
 #include "control_surface.h"
+#include "build_identity.h"
 #include "discovery.h"
 #include "inseglet_version.h"
 #include "main_thread_queue.h"
@@ -144,6 +145,13 @@ void writeDiscovery() {
                  {"protocol", "2025-06-18"},
                  {"server", "reaper_mcp"},
                  {"version", kInsegletVersion},
+                 // Which build WROTE this file.  The file is written at
+                 // startup by the running extension, so this names the build that was executing
+                 // when it was written -- which is NOT necessarily the build on disk now.  Read
+                 // it against the live `initialize` reply and against `dwarfdump --uuid`.
+                 {"buildUuid", ::reaper_mcp::loadedImageUuid().empty()
+                                   ? Json(nullptr)
+                                   : Json(::reaper_mcp::loadedImageUuid())},
                  {"pid", currentPid()}};
     writeDiscoveryFile(g_discoveryPath, info);
 }

@@ -190,6 +190,82 @@ int main() {
         }
     }
 
+    // ---- 3c. the edge guard, and the invariant it does NOT inherit ----
+    {
+        // The interpolator is fed ZEROS outside the buffer, so a buffer whose first or last sample
+        // is non-zero presents it with a step it rings at.  truePeakDb keeps reporting that ring;
+        // truePeakDbInterior is the same maximum with kTruePeakEdgeGuard samples excluded at BOTH
+        // ends, and truePeakEdgeDominated says the whole-buffer maximum came only from a guard.
+        //
+        // The fixture is Tech 3341 signal 18 (0.125 fs, 0.5, 67.5 deg), the case built and
+        // measured earlier.  ITS LENGTH IS 4802, NOT 4800, ON PURPOSE: 4800 is 600 WHOLE
+        // periods of an 8-sample signal, which reads the TAIL ring as exactly zero and hid it from
+        // the first instrument used here.  A test on a whole-period length would pass while measuring
+        // one edge and calling it both.
+        const size_t NE = 4802, nf18 = (size_t)(sr * 0.010);
+        auto sig18 = [&](bool fadeHead, bool fadeTail) {
+            AudioBuffer b = makeBuffer(1, sr, NE);
+            for (size_t i = 0; i < NE; ++i) {
+                double g = 1.0;
+                if (fadeHead && i < nf18)        g = 0.5 - 0.5 * std::cos(M_PI * (double)i / (double)nf18);
+                if (fadeTail && i >= NE - nf18)  g = 0.5 - 0.5 * std::cos(M_PI * (double)(NE - 1 - i) / (double)nf18);
+                setSample(b, i, 0, g * 0.5 * std::sin(2 * M_PI * 0.125 * (double)i + 67.5 * M_PI / 180.0));
+            }
+            return b;
+        };
+        check(NE % 8 != 0, "edge-guard fixture length is NOT a whole number of periods (d266 C-5)");
+
+        // ONE VARIABLE: the same signal, tapers on and off.
+        AudioBuffer raw = sig18(false, false), tap = sig18(true, true);
+        ChannelMetrics mr = analyzeChannel(raw, 0), mt = analyzeChannel(tap, 0);
+        check(mr.truePeakInteriorValid && mt.truePeakInteriorValid, "edge guard: both fixtures have an interior");
+        check(mr.truePeakEdgeDominated,  "raw-edged buffer: truePeakEdgeDominated is TRUE");
+        check(!mt.truePeakEdgeDominated, "tapered buffer: truePeakEdgeDominated is FALSE");
+        check(near(mr.truePeakDb - mr.truePeakDbInterior, 0.7096, 0.01),
+              "raw-edged buffer: the ring the two numbers disclose is ~+0.71 dB");
+        check(near(mt.truePeakDb - mt.truePeakDbInterior, 0.0, 1e-9),
+              "tapered buffer: the two numbers agree exactly");
+
+        // BOTH ENDS, SEPARATELY.  Doc 266's correction 2: the tail is not the lesser case.
+        AudioBuffer headRaw = sig18(false, true), tailRaw = sig18(true, false);
+        ChannelMetrics mh = analyzeChannel(headRaw, 0), mtl = analyzeChannel(tailRaw, 0);
+        check(mh.truePeakEdgeDominated,  "head raw / tail tapered: flag TRUE");
+        check(mtl.truePeakEdgeDominated, "tail raw / head tapered: flag TRUE");
+        check(near(mh.truePeakDb, mtl.truePeakDb, 1e-9),
+              "both edges ring by the SAME amount, at a non-whole-period length");
+
+        // The interior is a maximum over a SUBSET and can never exceed the maximum over the whole.
+        for (const ChannelMetrics* m : {&mr, &mt, &mh, &mtl})
+            check(m->truePeakDbInterior <= m->truePeakDb + 1e-12,
+                  "truePeakDbInterior never exceeds truePeakDb");
+
+        // NO INTERIOR: a buffer of exactly 2*guard frames has none, and the flag says so rather
+        // than a floor value standing in for a reading.
+        AudioBuffer tiny = makeBuffer(1, sr, (size_t)(2 * kTruePeakEdgeGuard));
+        for (size_t i = 0; i < tiny.frames; ++i) setSample(tiny, i, 0, (i % 2) ? -0.5 : 0.5);
+        ChannelMetrics mtiny = analyzeChannel(tiny, 0);
+        check(!mtiny.truePeakInteriorValid, "a buffer of 2*guard frames has NO interior");
+        check(!mtiny.truePeakEdgeDominated, "no interior => the flag is not set either");
+        AudioBuffer least = makeBuffer(1, sr, (size_t)(2 * kTruePeakEdgeGuard + 1));
+        for (size_t i = 0; i < least.frames; ++i) setSample(least, i, 0, (i % 2) ? -0.5 : 0.5);
+        check(analyzeChannel(least, 0).truePeakInteriorValid,
+              "a buffer of 2*guard+1 frames DOES have an interior");
+
+        // ⛔ THE INVARIANT THAT DOES NOT TRANSFER, ASSERTED AS INTENDED RATHER THAN LEFT TO SURPRISE.
+        //   Section 3b checks `truePeakDb >= peakDb` for every Tech 3341 signal, and that promise is
+        //   why the raw sample is kept as a floor.  truePeakDbInterior CANNOT keep it: a guarded
+        //   position is excluded entirely, sample and all.  A lone full-scale sample at index 0 is
+        //   the sharpest case, and this test exists so nobody "fixes" the field into breaking the
+        //   definition that was actually measured.
+        AudioBuffer lone = makeBuffer(1, sr, 100);
+        setSample(lone, 0, 0, 1.0);
+        ChannelMetrics ml = analyzeChannel(lone, 0);
+        check(near(ml.peakDb, 0.0, 1e-9), "lone full-scale sample at index 0: sample peak is 0 dBFS");
+        check(ml.truePeakInteriorValid && ml.truePeakDbInterior < ml.peakDb - 10.0,
+              "BY DESIGN: truePeakDbInterior is NOT bounded below by the sample peak");
+        check(ml.truePeakEdgeDominated, "lone edge sample: the flag names it");
+    }
+
     // ---- 4. K-weighting: ~flat at 1 kHz, attenuates lows, +6 dB doubling ----
     {
         AudioBuffer k1 = makeBuffer(1, sr, N);

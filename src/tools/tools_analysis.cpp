@@ -810,6 +810,17 @@ void registerAnalysisTools(ToolRegistry& reg) {
         "peak - a guarded position is excluded entirely, sample and all. Note that render bounds "
         "snap to a grid (1 ms at 48 kHz), so a window cannot be nudged by single samples to test a "
         "suspicious reading. "
+        "truePeakOversampling and truePeakGridBoundDb disclose what this estimator can and cannot "
+        "resolve. It reconstructs the waveform only on a grid of 1/truePeakOversampling of a "
+        "sample, so the nearest point it looks at can be half a grid step away from the real "
+        "inter-sample maximum; truePeakGridBoundDb is how far a full-band sine peak can fall below "
+        "the truth for that reason alone, and it errs in the unsafe direction - it reports headroom "
+        "you may not have. Two caveats, stated rather than left to be found: the bound covers the "
+        "grid ONLY and excludes the interpolation filter's own magnitude error, so the total "
+        "shortfall can exceed it; and it is derived for a sine, which real material is not. On a "
+        "short sharp transient this meter has been measured about 0.13 dB low against an "
+        "independent high-resolution reference. The oversampling factor is the minimum the "
+        "loudness standard allows; raising it would cost CPU on every call. "
         "Runs ONE bounded, non-destructive analysis render "
         "(snapshots + restores every RENDER_* field + selection; the temp file is deleted after "
         "reading) using the measure-don't-limit config, so a headroomed master is measured exactly. "
@@ -831,6 +842,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
             "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
             "truePeakEdgeGuardSamples":{"type":"integer"},"window":{"type":"object"},
+            "truePeakOversampling":{"type":"integer"},"truePeakGridBoundDb":{"type":"number"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "plan":{"type":"string"},"dryRun":{"type":"boolean"},
@@ -1313,6 +1325,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"boundsFlag", boundsFlag}, {"program", program}, {"window", window},
                         {"channelsDetail", chDetail}, {"downmix", downmix},
                         {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()},
                         {"measuredSource", "render+samples"}, {"rate", rate},
                         {"renderSilence", renderSilence}, {"crossRead", crossRead},
                         {"rawStats", f0.contains("stats") ? f0["stats"] : Json::object()},
@@ -1648,6 +1661,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                {"lufsIntegrated", r2(bestLufs)}};
             return Json{{"stems", stemJson}, {"loudest", loudest}, {"count", (int)stemJson.size()},
                         {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"warnings", warnings}};
 #else
@@ -1797,6 +1811,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                    "stem (gates drop inter-phrase silence). Approximation is honest "
                                    "only if the stem carries dialog exclusively."},
                         {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()},
                         {"measuredSource", "render-stats + render+samples"},
                         {"warnings", warnings}};
 #else
@@ -1949,6 +1964,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"deltas", Json{{"stereoVsMultichannelLu", r2(stereoVsMulti)},
                                         {"monoVsStereoLu", r2(monoVsStereo)}}},
                         {"interpretation", interp}, {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"warnings", warnings}};
 #else
@@ -2287,6 +2303,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             return Json{{"objects", objJson}, {"loudest", loudest}, {"count", (int)objJson.size()},
                         {"bed", bedJson}, {"bedVsObjects", bedVsObjects},
                         {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"interpretation", interp}, {"warnings", warnings}};
 #else
@@ -2441,6 +2458,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"midSide", Json{{"midRmsDb", r2(mm.rmsDb)}, {"sideRmsDb", r2(sm.rmsDb)},
                                          {"sideToMidDb", r2(sideToMid)}}},
                         {"interpretation", interp}, {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()},
                         {"measuredSource", "render-stats + render+samples"},
                         {"warnings", warnings}};
 #else
@@ -2896,6 +2914,8 @@ void registerAnalysisTools(ToolRegistry& reg) {
             out["target"] = t.label; out["source"] = t.source;
             out["channelsDetail"] = chDetail;
             out["truePeakEdgeGuardSamples"] = meter::kTruePeakEdgeGuard;   // the width used
+            out["truePeakOversampling"] = meter::kTruePeakOversampling;
+            out["truePeakGridBoundDb"]  = meter::truePeakGridBoundDb();
             out["measuredSource"] = "accessor";
             if (optBool(a, "overview", false)) {
                 const int buckets = optInt(a, "overviewBuckets", 512);
@@ -3008,6 +3028,8 @@ void registerAnalysisTools(ToolRegistry& reg) {
             out["target"] = t.label; out["source"] = t.source; out["layout"] = bedLayoutName(nc);
             out["loudness"] = loudness; out["channelsDetail"] = chDetail; out["downmix"] = downmix;
             out["truePeakEdgeGuardSamples"] = meter::kTruePeakEdgeGuard;   // the width used
+            out["truePeakOversampling"] = meter::kTruePeakOversampling;
+            out["truePeakGridBoundDb"]  = meter::truePeakGridBoundDb();
             out["measuredSource"] = "accessor";
             Json warnings = Json::array();
             if (!t.isTake)
@@ -3681,6 +3703,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
             "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
             "truePeakEdgeGuardSamples":{"type":"integer"},"window":{"type":"object"},
+            "truePeakOversampling":{"type":"integer"},"truePeakGridBoundDb":{"type":"number"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "revive":{"type":"object"},"beforeRevive":{"type":"object"},

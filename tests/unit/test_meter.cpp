@@ -266,6 +266,32 @@ int main() {
         check(ml.truePeakEdgeDominated, "lone edge sample: the flag names it");
     }
 
+    // ---- 3d. the estimator DISCLOSES its own ceiling ----
+    {
+        // The 4x estimator evaluates the reconstructed waveform on a grid of 1/OS of a sample, so
+        // the nearest point it looks at is at most 1/(2*OS) away from a real inter-sample maximum.
+        // truePeakGridBoundDb is how far a full-band sine peak can therefore fall BELOW the truth.
+        // ⛔ THIS TEST DOES NOT RE-DERIVE THE FORMULA -- that would just assert the code against
+        //    itself.  It asserts three things the code could get wrong INDEPENDENTLY:
+        const double b = truePeakGridBoundDb();
+        //  (a) it agrees with the closed form to the last bit a double carries.
+        const double closed = -20.0 * std::log10(std::cos(M_PI / (2.0 * (double)kTruePeakOversampling)));
+        check(std::fabs(b - closed) < 1e-12, "grid bound == -20 log10 cos(pi/(2*OS))");
+        //  (b) it is POSITIVE and SMALL -- a sign error here would tell a user the meter reads high.
+        check(b > 0.0 && b < 3.0, "grid bound is a positive, small number of dB");
+        //  (c) THE ONE MEASURED DATUM SITS INSIDE IT.  An independent 64x reference read a true
+        //      peak 0.133863 dB above this meter on fs/4 content; the same closed form at fs/4 is
+        //      0.1685 dB.  If a future change made the bound tighter than the error we have
+        //      actually observed, the disclosure would be a false reassurance -- which is worse
+        //      than no disclosure.  ⚠️ n = 1, and this test says so rather than implying more.
+        const double atQuarter = -20.0 * std::log10(std::cos(2.0 * M_PI * 0.25 / (2.0 * (double)kTruePeakOversampling)));
+        check(atQuarter > 0.133863, "the fs/4 bound still covers the one measured shortfall (n=1)");
+        // (d) the phase table really has OS rows -- the loop's factor and the disclosed factor are
+        //     the same number, which is the drift this constant exists to prevent.
+        check((int)truePeakPolyphase().size() == kTruePeakOversampling,
+              "the polyphase table has kTruePeakOversampling rows");
+    }
+
     // ---- 4. K-weighting: ~flat at 1 kHz, attenuates lows, +6 dB doubling ----
     {
         AudioBuffer k1 = makeBuffer(1, sr, N);

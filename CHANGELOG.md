@@ -6,6 +6,28 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.19.0] — the true-peak reading says how much it cannot see (2026-09-04)
+
+### Added
+- **`truePeakOversampling` and `truePeakGridBoundDb` on every payload that already carried
+  `truePeakEdgeGuardSamples`.** The estimator evaluates the reconstructed waveform on a grid of
+  1/`truePeakOversampling` of a sample, so the nearest evaluated point can be half a grid step from a
+  real inter-sample maximum and the reading falls BELOW the truth — the unsafe direction.
+  `truePeakGridBoundDb` is `-20*log10(cos(pi/(2*OS)))`, **computed from the factor, never a literal**.
+- **The bound ships with its scope**, in the comment and in the user-visible description: it covers the
+  EVALUATION GRID only, **EXCLUDES** the interpolation filter's own magnitude error, and is derived for
+  a sine. A bound whose scope is not stated is a claim, not a measurement.
+
+### Unchanged, and measured to be
+- **`truePeakDb`.** The header was compiled before and after and read IDENTICAL over 12 fixtures,
+  all five Tech 3341 signals included.
+
+### Measurement
+- **The meter is now measured against all NINE EBU Tech 3341 true-peak signals rather than five.**
+  Cases 20–23, read from the EBU *Loudness test set* v5.0's own published files rather than
+  synthesised, read −0.130183 / −0.078912 / −0.204110 / −0.078911 dBTP against an expected 0.0 —
+  every one inside the +0.2/−0.4 dB window.
+
 ## [1.18.0] — every true-peak reading says whether it came from an edge (2026-09-04)
 
 ### Added

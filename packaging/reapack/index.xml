@@ -19,6 +19,38 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.19.0" author="James Livingston" time="2026-09-04T10:15:00Z">
+        <changelog><![CDATA[The true-peak reading now tells you how much it cannot see.
+
+A true peak is the highest point a sound reaches BETWEEN your samples, and it is found by
+reconstructing the waveform and inspecting it on a grid of points. Inseglet's estimator inspects
+every quarter of a sample -- the minimum ITU-R BS.1770-4 allows -- so the nearest point it looks at
+can sit an eighth of a sample away from a real inter-sample maximum, and the number it reports falls
+BELOW the truth by an amount that grows with frequency. It errs in the unsafe direction: it reports
+headroom that is not there.
+
+WHAT CHANGES.
+
+Every payload that already reported `truePeakEdgeGuardSamples` now reports two more fields beside
+it. `truePeakOversampling` is the grid factor in use. `truePeakGridBoundDb` is how far a full-band
+sine peak can fall below the truth FROM THE GRID ALONE. The bound is computed from the factor rather
+than written down as a number, so it cannot drift away from the code that produces it.
+
+THE BOUND SHIPS WITH ITS SCOPE, because a bound whose scope is not stated is a claim rather than a
+measurement. It covers the evaluation grid ONLY. It EXCLUDES the interpolation filter's own
+magnitude error, so the total shortfall on real material can exceed it, and it is derived for a
+sine.
+
+`truePeakDb` itself is unchanged. The header was compiled before and after the change and read
+IDENTICAL over 12 fixtures, all five EBU Tech 3341 true-peak signals included.
+
+AND THE METER IS NOW MEASURED AGAINST ALL NINE OF THOSE SIGNALS RATHER THAN FIVE. Cases 20 to 23,
+read from the EBU's own published Loudness test set rather than synthesised in-process, read
+-0.130183, -0.078912, -0.204110 and -0.078911 dBTP against an expected 0.0 -- every one inside the
++0.2/-0.4 dB window Tech 3341 sets.
+]]></changelog>
+        <source main="main" file="reaper_mcp.dylib" platform="darwin">https://github.com/inseglet-audio/inseglet/releases/download/v1.19.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.18.0" author="James Livingston" time="2026-09-04T00:32:38Z">
         <changelog><![CDATA[Every true-peak reading now says whether it came from the edge of the window you asked for, and the meter reports the window it actually rendered.
 

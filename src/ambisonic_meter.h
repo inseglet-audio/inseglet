@@ -288,17 +288,59 @@ inline std::vector<std::vector<double>> truePeakPolyphase() {
 inline constexpr int kTruePeakTaps      = 12;   // ITU-R BS.1770-4 Annex 2, per phase
 inline constexpr int kTruePeakEdgeGuard = kTruePeakTaps / 2;
 
+// The oversampling factor, and THE CEILING IT PUTS ON THIS METER'S HONESTY.
+//
+// WHY THIS EXISTS.  A 4x estimator evaluates the reconstructed waveform only on a grid of 1/4
+//   sample, so the nearest evaluation point to an actual inter-sample maximum is at most 1/8 of a
+//   sample away.  For a sinusoid at frequency f the value there is cos(2*pi*f*dt) times the peak,
+//   with dt = 1/(2*OS) samples -- so the reading can fall BELOW the truth, and the shortfall grows
+//   with frequency.  At the band edge that is -20*log10(cos(pi/(2*OS))).
+//   ⛔ IT ERRS IN THE UNSAFE DIRECTION: it reports headroom that is not there.  A meter whose whole
+//   job is to be trusted at the ceiling should say so rather than let the number stand alone --
+//   the same argument that put the edge-guard reading beside the number it explains.
+//
+// ⛔ WHAT THE BOUND COVERS AND WHAT IT DOES NOT, because a bound whose scope is not stated is a
+//   claim rather than a measurement:
+//     it covers  -- the EVALUATION GRID: the estimator simply does not look between its phases.
+//     it EXCLUDES -- the interpolation filter's own magnitude error at the phase it does evaluate,
+//                    which is a separate quantity of a different sign convention and is not
+//                    modelled here.  ⇒ THE TOTAL SHORTFALL CAN EXCEED THIS NUMBER.  The field is
+//                    named "grid" for that reason and the tool description says it in words.
+//     it assumes  -- a sinusoid.  A general band-limited signal is not one, and the extension is
+//                    standard textbook reasoning rather than something measured here.
+//
+// ⚠️ ONE MEASURED DATUM, AND IT IS n = 1.  An independent 64x sinc reference calibrated against
+//   closed-form sine peaks to 1.3e-5 dB read a Tech 3341 case-22-style construction 0.133863 dB
+//   ABOVE this meter.  That signal's content sits at fs/4, where this closed form gives
+//   0.168521213 dB -- so the measurement is INSIDE the bound.  Corroboration, not proof.
+//
+// ⛔ RAISING OS IS A DIFFERENT CHANGE AND IS NOT THIS ONE.  It costs CPU on every meter call and
+//   on every export path that meters, whether or not the material has a transient.  Disclosing the
+//   ceiling is cheap and honest and LEAVES THE NUMBER WRONG; that trade was made deliberately.
+inline constexpr int kTruePeakOversampling = 4;   // BS.1770-4 Annex 2: 4x is the MINIMUM it allows
+
+inline double truePeakGridBoundDb() {
+    // ⛔ COMPUTED, NEVER A LITERAL.  Change kTruePeakOversampling and this follows it; a hardcoded
+    //   0.6877 would quietly describe a meter that no longer exists.
+    return -20.0 * std::log10(std::cos(M_PI / (2.0 * (double)kTruePeakOversampling)));
+}
+
 // The maximum of |x| AND of all four interpolated phases, taken over OUTPUT POSITIONS [lo, hi).
 // ⛔ THE TAPS STILL REACH OUTSIDE [lo, hi) AND OUTSIDE THE BUFFER.  Restricting the range does not
 //    change the filter; it declines to REPORT the filter's output where the filter was fed zeros
 //    that are not in the signal.  That is the whole content of an "edge guard".
 inline double truePeakLinearOver(const AudioBuffer& buf, int ch, size_t lo, size_t hi) {
     static const std::vector<std::vector<double>> ph = truePeakPolyphase();
-    const int OS = 4, taps = (int)ph[0].size(), half = taps / 2;
+    const int OS = kTruePeakOversampling, taps = (int)ph[0].size(), half = taps / 2;
     // The guard constant is derived from the tap count; if the table ever changes shape, the guard
     // is silently wrong.  This is the only place both are visible, so this is where it is checked.
     static_assert(kTruePeakEdgeGuard == kTruePeakTaps / 2, "guard must stay taps/2");
     assert(taps == kTruePeakTaps);
+    // ⛔ AND THE SAME TIE FOR THE OVERSAMPLING FACTOR.  This loop used a LOCAL literal 4 while the
+    //   disclosed bound is computed from kTruePeakOversampling: two numbers describing one thing,
+    //   free to drift, with the payload telling a user about the one the loop does not use.  That
+    //   is a drift this project closes here rather than leaving to be found.
+    assert((int)ph.size() == kTruePeakOversampling);
     double peak = 0.0;
     for (size_t i = lo; i < hi; ++i) {
         double s0 = std::fabs((double)buf.at(i, ch));

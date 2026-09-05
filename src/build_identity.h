@@ -5,7 +5,7 @@
 //
 // ⛔ THE DEFECT THIS EXISTS FOR, IN PLAIN WORDS.  Replacing the plug-in file does not change what
 //    REAPER is already running, and until this file nothing in the product could tell you which
-//    one it had.  Doc 267 installed a new dylib, did not relaunch, and ran an arm against the OLD
+//    one it had.  A session once installed a new dylib, did not relaunch, and ran a check against the OLD
 //    code while every available check agreed everything was fine:
 //      * `shasum` on the installed dylib reads THE FILE ON DISK, not the code mapped into the
 //        process — they are the same object only until someone overwrites the file;

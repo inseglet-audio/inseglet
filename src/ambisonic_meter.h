@@ -273,13 +273,13 @@ inline std::vector<std::vector<double>> truePeakPolyphase() {
 //    Change the table and this constant follows it: kTruePeakEdgeGuard IS kTruePeakTaps / 2, and
 //    truePeakLinearOver ASSERTS the table really has that many taps, so the two cannot drift.
 //
-// ⛔ AND IT CONTRADICTS DOC 266's CORRECTION 1, WHICH SAID "the guard must be 2, not 8".
+// ⛔ AND IT CONTRADICTS AN EARLIER CORRECTION, WHICH SAID "the guard must be 2, not 8".
 //    That figure came from sweeping ONE synthetic sine of period 8 samples, whose ring happens to
-//    collapse within two positions.  Doc 267 measured the residual THROUGH THE PRODUCT on real
+//    collapse within two positions.  The residual was then measured THROUGH THE PRODUCT on real
 //    material (~439.5 Hz, period ~109 samples) across eight 1 ms window positions and read:
 //        guard 2 -> +0.115617 dB of the artefact LEFT BEHIND    guard 4 -> +0.041171
 //        guard 5, 6, 7, 8 -> +0.000000
-//    ⇒ a guard of 2 SHIPS THE DEFECT IT WAS ADDED TO DISCLOSE, on ordinary material.  Doc 265's
+//    ⇒ a guard of 2 SHIPS THE DEFECT IT WAS ADDED TO DISCLOSE, on ordinary material.  The earlier
 //    "generous 8" was closer to right than the beat that corrected it, and the derivation above
 //    is why 6 rather than 8: 8 is a round number, 6 is the tap geometry.
 //
@@ -313,6 +313,13 @@ inline constexpr int kTruePeakEdgeGuard = kTruePeakTaps / 2;
 //   closed-form sine peaks to 1.3e-5 dB read a Tech 3341 case-22-style construction 0.133863 dB
 //   ABOVE this meter.  That signal's content sits at fs/4, where this closed form gives
 //   0.168521213 dB -- so the measurement is INSIDE the bound.  Corroboration, not proof.
+// ⛔ SUPERSEDED FIGURE, KEPT FOR THE TRAIL: that 0.133863 was measured on a SYNTHESISED
+//   case 22 against a reference later shown NOT converged.  Measured since, against an exact
+//   reference, on the EBU's PUBLISHED files: case 22 reads 0.1252 dB low, case 17 reads 0.2953 dB
+//   low (the grid accounts for 0.1685 of it at fs/4; the rest is the filter's loss), and on
+//   programme material the meter reads up to 0.521751 dB LOW (SQAM 27, castanets) and up to
+//   +0.215802 dB HIGH (Euroradio 05).  The HIGH side is what truePeakFilterGainBoundDb, below the
+//   grid bound, now discloses; the LOW side beyond the grid bound is disclosed in words only.
 //
 // ⛔ RAISING OS IS A DIFFERENT CHANGE AND IS NOT THIS ONE.  It costs CPU on every meter call and
 //   on every export path that meters, whether or not the material has a transient.  Disclosing the
@@ -323,6 +330,66 @@ inline double truePeakGridBoundDb() {
     // ⛔ COMPUTED, NEVER A LITERAL.  Change kTruePeakOversampling and this follows it; a hardcoded
     //   0.6877 would quietly describe a meter that no longer exists.
     return -20.0 * std::log10(std::cos(M_PI / (2.0 * (double)kTruePeakOversampling)));
+}
+
+// THE OTHER SIDE OF THE BOUND: the interpolation filter's own GAIN ABOVE UNITY.
+//
+// WHY THIS EXISTS.  truePeakGridBoundDb above bounds one direction only -- how far the GRID can read
+//   a sine LOW -- and it declared the filter's magnitude error as an exclusion.  That exclusion was
+//   then measured: against an exact (FFT-domain) reference, with every window read in its file
+//   context, the shipped table reads the EBU's Euroradio programme material up to +0.215802 dB HIGH.
+//   An over-read has exactly one source in this estimator: a phase whose gain exceeds 1 at the
+//   signal's frequency.  So the over-read bound for a sine is the largest |H_p(f)| over the four
+//   phases and all frequencies -- a number that follows from the twelve tabulated coefficients and
+//   nothing else.  For the shipped table it is attained near fs/4 (phase 1), where the table's
+//   best-phase gain is +0.22 dB.  A reading can therefore sit ABOVE the truth by up to this much:
+//       truth - (grid bound + filter loss)  <=  truePeakDb  <=  truth + truePeakFilterGainBoundDb.
+//
+// ⛔ WHAT IT COVERS AND WHAT IT DOES NOT:
+//     it covers  -- the FILTER's gain above unity at the phases the estimator evaluates, for a sine.
+//                   It is an OVER-read bound; a reading above it is a defect in this code.
+//     it EXCLUDES -- the filter's LOSS (gain below unity), which adds to the LOW side beyond the
+//                    grid bound and is NOT bounded by any field: on the standard's own case 17 the
+//                    meter reads 0.2953 dB low where the grid alone accounts for 0.1685, and on
+//                    castanets (EBU SQAM 27, 44.1 kHz) 0.521751 dB low against an exact reference.
+//     it assumes  -- a sinusoid, like its sibling; on a broadband transient the phases' phase error
+//                    can align components better than the input had them, and a measurement showed a
+//                    24-tap design over-reading a real window by 0.011 dB MORE than its sine bound.
+//     it applies to -- the INTERIOR reading (truePeakDbInterior).  truePeakDb is the whole-buffer
+//                    maximum and its taps are fed zeros beyond the buffer; at a raw edge the step
+//                    they ring at can exceed the filter's gain on the signal (measured at
+//                    up to 0.94 dB on one steady tone).  truePeakEdgeDominated is the flag; the unit
+//                    test asserts both halves.  ⚠️ The first build of that test asserted the bound
+//                    through truePeakDb() and FAILED -- correctly.
+//
+// ⛔ COMPUTED FROM THE TABLE AT FIRST CALL, NEVER A LITERAL.  Change one coefficient and this follows
+//   it; a hardcoded 0.222 would describe a table that no longer exists (the same argument as above,
+//   and the unit test asserts the bound is TIGHT against the meter itself, which a stale literal
+//   would fail).  The scan is 8193 points on [0, fs/2] plus a golden-section refinement; the cost
+//   is paid once per process.
+inline double truePeakFilterGainBoundDb() {
+    static const double bound = [] {
+        const std::vector<std::vector<double>> ph = truePeakPolyphase();
+        const int taps = (int)ph[0].size(), half = taps / 2;
+        auto gainAt = [&](double f) {
+            const double w = 2.0 * M_PI * f; double g = 0.0;
+            for (const auto& hp : ph) {
+                double re = 0.0, im = 0.0;
+                for (int t = 0; t < taps; ++t) { const double m = (double)(t - half + 1); re += hp[t] * std::cos(w * m); im += hp[t] * std::sin(w * m); }
+                const double a = std::sqrt(re * re + im * im); if (a > g) g = a;
+            }
+            return g;
+        };
+        const int N = 8192; double best = 0.0, fb = 0.0;
+        for (int k = 0; k <= N; ++k) { const double f = 0.5 * (double)k / N; const double g = gainAt(f); if (g > best) { best = g; fb = f; } }
+        double lo = fb - 0.5 / N, hi = fb + 0.5 / N; if (lo < 0.0) lo = 0.0; if (hi > 0.5) hi = 0.5;
+        for (int it = 0; it < 80; ++it) {
+            const double a = hi - 0.618033988749895 * (hi - lo), b = lo + 0.618033988749895 * (hi - lo);
+            if (gainAt(a) < gainAt(b)) lo = a; else hi = b;
+        }
+        return 20.0 * std::log10(gainAt(0.5 * (lo + hi)));
+    }();
+    return bound;
 }
 
 // The maximum of |x| AND of all four interpolated phases, taken over OUTPUT POSITIONS [lo, hi).
@@ -363,7 +430,7 @@ inline double truePeakLinearOver(const AudioBuffer& buf, int ch, size_t lo, size
 // is kept as a floor on purpose: the table alone reads a sample-aligned peak up to ~0.22 dB BELOW the
 // sample (its nearest evaluation point is 1/8 sample away, and its outer phases sit at -0.02 dB at
 // fs/4), and a true peak reported below the sample peak is not a reading anyone should act on.
-// ⛔ UNCHANGED BY DOC 267.  It is the whole-buffer maximum, it stays the whole-buffer maximum, and
+// ⛔ UNCHANGED.  It is the whole-buffer maximum, it stays the whole-buffer maximum, and
 //    the number published in 1.17.0 does not move.  That is exactly what is forbidden here.
 inline double truePeakDb(const AudioBuffer& buf, int ch) {
     return linToDb(truePeakLinearOver(buf, ch, 0, buf.frames));

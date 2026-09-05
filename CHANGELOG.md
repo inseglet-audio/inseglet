@@ -6,6 +6,37 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.20.0] — the true-peak reading says how much it cannot see, on BOTH sides (2026-09-05)
+
+### Added
+- **`truePeakFilterGainBoundDb` on every payload that already carried `truePeakGridBoundDb`** (ten
+  sites, derived by the apply script). 1.19.0 disclosed how far the evaluation GRID can read a sine
+  LOW and declared the interpolation filter's own magnitude error an exclusion. That exclusion was then
+  measured: against an exact reference, with every window read in its file context, the estimator
+  reads EBU Euroradio programme material up to **+0.22 dB HIGH**. An over-read has one source in this
+  estimator — a phase whose gain exceeds 1 at the signal's frequency — so the bound is the largest gain
+  of any phase of the tabulated filter at any frequency, **computed from the table at first call, never
+  a literal** (0.222 dB for the Recommendation's table, near fs/4). The unit test asserts it is TIGHT
+  against the meter itself, so a literal that drifted from the table would fail.
+- **The bound ships with its scope**, in the comment and in the user-visible description: it is an
+  OVER-read bound for the INTERIOR reading (at a raw window edge `truePeakDb` can exceed it by the edge
+  ring `truePeakEdgeDominated` flags — the first build of the test asserted it through `truePeakDb`
+  and failed, correctly); it does NOT bound the filter's LOSS on the low side; it is derived for a sine,
+  and a broadband transient can exceed it slightly.
+
+### Changed
+- **The description now states the measured worst cases with their provenance** instead of the single
+  figure 1.19.0 carried ("about 0.13 dB low", measured on a synthesised signal against a reference
+  later shown not converged): the standard's own true-peak test signals read up to 0.30 dB low (Tech
+  3341 case 17, inside the standard's tolerance); programme material reads up to 0.52 dB LOW (SQAM 27,
+  castanets) and up to 0.22 dB HIGH (Euroradio 05), all against an exact reference on the EBU's
+  published files. A professional can now bracket a reading from both sides and judge whether the
+  tolerance meets their standard.
+
+### Unchanged, and measured to be
+- **`truePeakDb`.** The header was compiled before and after and read IDENTICAL over the same 12
+  fixtures as 1.19.0. `ctest -R unit` 30/30 (derived); string gate 0 blockers.
+
 ## [1.19.0] — the true-peak reading says how much it cannot see (2026-09-04)
 
 ### Added

@@ -319,7 +319,7 @@ int main() {
     }
 
     // ==== constantHz, and the degenerate-plan refusal it exposed ========================
-    // Measured on the tree BEFORE the guard existed (/tmp/d152-probe.cpp): a 22.2 plan with the
+    // Measured on the tree BEFORE the guard existed (a throwaway probe): a 22.2 plan with the
     // lfeChannels its own tool echoes ({3, 9}) put 40 Hz on two slots, and a PERFECTLY ROUTED
     // 24-channel render came back ok=false, channel 3 "bleed" at a margin of exactly 0.000000000
     // dB, channel 9 "duplicated", planCoverage 1.000000 on both. Two false verdicts about correct

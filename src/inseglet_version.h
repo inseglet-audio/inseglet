@@ -30,5 +30,5 @@
 #pragma once
 
 namespace reaper_mcp {
-constexpr char kInsegletVersion[] = "1.19.0";
+constexpr char kInsegletVersion[] = "1.20.0";
 }  // namespace reaper_mcp

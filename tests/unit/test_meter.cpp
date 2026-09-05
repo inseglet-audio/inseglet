@@ -226,7 +226,7 @@ int main() {
         check(near(mt.truePeakDb - mt.truePeakDbInterior, 0.0, 1e-9),
               "tapered buffer: the two numbers agree exactly");
 
-        // BOTH ENDS, SEPARATELY.  Doc 266's correction 2: the tail is not the lesser case.
+        // BOTH ENDS, SEPARATELY.  The earlier correction's second half: the tail is not the lesser case.
         AudioBuffer headRaw = sig18(false, true), tailRaw = sig18(true, false);
         ChannelMetrics mh = analyzeChannel(headRaw, 0), mtl = analyzeChannel(tailRaw, 0);
         check(mh.truePeakEdgeDominated,  "head raw / tail tapered: flag TRUE");
@@ -290,6 +290,50 @@ int main() {
         //     the same number, which is the drift this constant exists to prevent.
         check((int)truePeakPolyphase().size() == kTruePeakOversampling,
               "the polyphase table has kTruePeakOversampling rows");
+        // ---- 3d, continued: the OTHER side of the bound ----
+        //  (e) the filter-gain bound is positive and small, and smaller than the grid bound: a sign
+        //      error would tell a user the filter attenuates; a large value would mean the table is not
+        //      the Recommendation's.
+        const double g = truePeakFilterGainBoundDb();
+        check(g > 0.0 && g < b, "filter-gain bound is positive and smaller than the grid bound");
+        //  (f) THE BOUND IS TIGHT AGAINST THE METER ITSELF -- a sine at the frequency where the table's
+        //      gain peaks, driven through truePeakDb at 32 sub-sample alignments, reads within 0.002 dB
+        //      of truth + bound, and never above it.  A literal that drifted from the table would fail
+        //      this; a bound that was not the table's maximum would fail this.  The frequency is found
+        //      here by scanning the table a second way (coarse), not read from the function under test.
+        {
+            const auto ph = truePeakPolyphase(); const int taps = (int)ph[0].size(), half = taps / 2;
+            double bestG = 0.0, bestF = 0.0;
+            for (int k = 0; k <= 2000; ++k) {
+                const double f = 0.5 * k / 2000.0, w = 2 * M_PI * f; double gg = 0.0;
+                for (const auto& hp : ph) { double re = 0, im = 0;
+                    for (int tt = 0; tt < taps; ++tt) { const double m = tt - half + 1; re += hp[tt] * std::cos(w * m); im += hp[tt] * std::sin(w * m); }
+                    gg = std::max(gg, std::sqrt(re * re + im * im)); }
+                if (gg > bestG) { bestG = gg; bestF = f; }
+            }
+            double worst = -1e9, worstWhole = -1e9;
+            for (int o = 0; o < 32; ++o) {
+                AudioBuffer sn = makeBuffer(1, sr, 4096);
+                for (size_t i = 0; i < 4096; ++i) setSample(sn, i, 0, std::sin(2 * M_PI * bestF * i + 2 * M_PI * o / 32.0));
+                double interior = 0.0;
+                const bool valid = truePeakDbInterior(sn, 0, interior);
+                check(valid, "the interior reading is valid on a 4096-sample buffer");
+                worst = std::max(worst, interior);                   // truth is 0 dBFS
+                worstWhole = std::max(worstWhole, truePeakDb(sn, 0));
+            }
+            check(worst <= g + 1e-6, "no sine over-reads the filter-gain bound through the INTERIOR reading (32 alignments at the worst frequency)");
+            check(worst >= g - 0.002, "the filter-gain bound is TIGHT: the worst-frequency sine reaches it within 0.002 dB");
+            //  (f') THE SCOPE, AS A TEST: the WHOLE-buffer reading CAN exceed the bound, because at the buffer's
+            //       edges the taps are fed zeros and ring at the step.  The first build of this test
+            //       asserted the bound through truePeakDb() and FAILED -- correctly.  The bound is about the
+            //       filter on the signal; an edge is not the signal, and truePeakEdgeDominated is the flag.
+            check(worstWhole > worst, "SCOPE: the whole-buffer reading exceeds the interior at a raw edge, so the bound is for the interior");
+        }
+        //  (g) THE MEASURED PROGRAMME OVER-READ SITS INSIDE IT: an exact-reference measurement read +0.215802 dB on EBU
+        //      Euroradio 05 against an exact reference, in context.  If a future table change made the
+        //      bound tighter than an over-read already observed, the disclosure would be a false
+        //      reassurance.  One material, stated as such.
+        check(0.215802 <= g, "the disclosed over-read bound covers the measured programme over-read (euro-05)");
     }
 
     // ---- 4. K-weighting: ~flat at 1 kHz, attenuates lows, +6 dB doubling ----

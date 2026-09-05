@@ -1,35 +1,38 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.19.0
+@version 1.20.0
 @author James Livingston
 @link https://github.com/inseglet-audio/inseglet
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  The true-peak reading now tells you how much it cannot see.
+  The true-peak reading now tells you how much it cannot see -- on BOTH sides.
 
-  A true peak is the highest point a sound reaches BETWEEN your samples, and it is found by
-  reconstructing the waveform and inspecting it on a grid of points. Inseglet's estimator inspects
-  every quarter of a sample -- the minimum ITU-R BS.1770-4 allows -- so the nearest point it looks at
-  can sit an eighth of a sample away from a real inter-sample maximum, and the number it reports falls
-  BELOW the truth by an amount that grows with frequency. It errs in the unsafe direction: it reports
-  headroom that is not there.
+  Version 1.19.0 disclosed how far the estimator's evaluation grid can read a sine BELOW the truth,
+  and said in words that the interpolation filter's own error was not covered. That error has now
+  been measured, against an exact reference, on the EBU's published programme material, with every
+  window read in the context of its file rather than cut out of it: the estimator can also read
+  ABOVE the truth, by up to 0.22 dB on Euroradio material.
 
   WHAT CHANGES.
 
-  Every payload that already reported `truePeakEdgeGuardSamples` now reports two more fields beside
-  it. `truePeakOversampling` is the grid factor in use. `truePeakGridBoundDb` is how far a full-band
-  sine peak can fall below the truth FROM THE GRID ALONE. The bound is computed from the factor rather
-  than written down as a number, so it cannot drift away from the code that produces it.
+  Every payload that already reported `truePeakGridBoundDb` now reports `truePeakFilterGainBoundDb`
+  beside it: the most a reading can sit above the truth for a sine, computed from the filter's own
+  coefficients at first call rather than written down as a number, so it cannot drift away from the
+  code that produces it. For the Recommendation's table it is 0.222 dB, reached near a quarter of the
+  sample rate.
 
-  THE BOUND SHIPS WITH ITS SCOPE, because a bound whose scope is not stated is a claim rather than a
-  measurement. It covers the evaluation grid ONLY. It EXCLUDES the interpolation filter's own
-  magnitude error, so the total shortfall on real material can exceed it, and it is derived for a
-  sine.
+  THE BOUND SHIPS WITH ITS SCOPE. It is an OVER-read bound for the INTERIOR reading
+  (`truePeakDbInterior`): at a raw window edge `truePeakDb` can exceed it by the edge ring that
+  `truePeakEdgeDominated` already flags. It does not bound the filter's LOSS on the low side, and it
+  is derived for a sine -- a broadband transient can exceed it slightly.
 
-  `truePeakDb` itself is unchanged. The header was compiled before and after the change and read
-  IDENTICAL over 12 fixtures, all five EBU Tech 3341 true-peak signals included.
+  THE DESCRIPTION NOW STATES THE MEASURED WORST CASES WITH THEIR PROVENANCE, replacing the single
+  figure 1.19.0 carried ("about 0.13 dB low", measured on a synthesised signal against a reference
+  later shown not to have converged): the standard's own true-peak test signals read up to 0.30 dB
+  low (EBU Tech 3341 case 17, inside the standard's tolerance); programme material reads up to
+  0.52 dB LOW (SQAM 27, castanets) and up to 0.22 dB HIGH (Euroradio 05), all against an exact
+  reference on the EBU's published files. A professional can bracket a reading from both sides and
+  judge whether the tolerance meets their standard, or reach for a more accurate tool.
 
-  AND THE METER IS NOW MEASURED AGAINST ALL NINE OF THOSE SIGNALS RATHER THAN FIVE. Cases 20 to 23,
-  read from the EBU's own published Loudness test set rather than synthesised in-process, read
-  -0.130183, -0.078912, -0.204110 and -0.078911 dBTP against an expected 0.0 -- every one inside the
-  +0.2/-0.4 dB window Tech 3341 sets.
+  `truePeakDb` itself is unchanged: the header was compiled before and after and read IDENTICAL over
+  the same 12 fixtures as 1.19.0.

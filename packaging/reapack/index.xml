@@ -19,6 +19,39 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.21.0" author="James Livingston" time="2026-09-06T05:08:06Z">
+        <changelog><![CDATA[The true-peak interpolator is now our own design, and the estimator says all four of its bounds as numbers.
+
+WHAT CHANGES.
+
+The true-peak estimator replaces the ITU-R BS.1770-4 Annex 2 table (12 taps at 4x oversampling -- the
+Recommendation's minimum) with a 24-tap, 8x polyphase interpolator designed for this product. Measured
+the same way on the same EBU programme material, every window read in the context of its file against an
+exact reference: the worst under-read falls from 0.52 dB to 0.14 dB (SQAM 27, castanets) and the worst
+over-read from 0.22 dB to 0.10 dB (SQAM 64); the standard's own fs/4 test tones read 0.13 dB low, inside
+Tech 3341's window. `truePeakDb` MOVES on real material -- that is the point of the change.
+
+Every disclosed bound followed the table, because each is computed from it at first call rather than
+written down: `truePeakGridBoundDb` 0.169 dB (was 0.688), `truePeakFilterGainBoundDb` +0.086 dB (was
++0.222), `truePeakEdgeGuardSamples` 12 (was 6; it is taps/2).
+
+TWO NEW FIELDS complete the disclosure in numbers, on every payload that carries the others:
+`truePeakFilterLossBoundDb` (0.088 dB) -- how far the interpolation filter itself can read a sine low
+within its passband, beyond what the grid misses; and `truePeakSineLowBoundDb` (0.127 dB, reached at a
+quarter of the sample rate) -- the estimator's actual worst under-read of a steady sine with the grid,
+the filter's loss and its phase error all in, tighter than the sum of the two. The passband edge ships
+as a constant (0.45 of the sample rate) beside the table.
+
+THE BOUNDS ARE FOR A SINE, and the description says so: for a sine inside the passband the interior
+reading is never lower than the truth minus `truePeakSineLowBoundDb` and never higher than the truth
+plus `truePeakFilterGainBoundDb`.
+
+COST. The meter now runs one interpolation pass for both true-peak numbers where it ran two. Measured on
+a machine a load witness certified quiet for the whole run, the new meter call takes 3.49x the previous
+one -- about 0.4 s per minute of audio at 48 kHz, one channel, where the previous meter spent 0.11 s.
+]]></changelog>
+        <source main="main" file="reaper_mcp.dylib" platform="darwin">https://github.com/inseglet-audio/inseglet/releases/download/v1.21.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.20.0" author="James Livingston" time="2026-09-05T07:57:17Z">
         <changelog><![CDATA[The true-peak reading now tells you how much it cannot see -- on BOTH sides.
 

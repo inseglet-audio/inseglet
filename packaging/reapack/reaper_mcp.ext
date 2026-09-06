@@ -1,38 +1,36 @@
 @description REAPER MCP — Model Context Protocol interface (immersive/spatial audio)
-@version 1.20.0
+@version 1.21.0
 @author James Livingston
 @link https://github.com/inseglet-audio/inseglet
 @provides
   [darwin] reaper_mcp.dylib https://github.com/inseglet-audio/inseglet/releases/download/v$version/reaper_mcp.dylib
 @changelog
-  The true-peak reading now tells you how much it cannot see -- on BOTH sides.
-
-  Version 1.19.0 disclosed how far the estimator's evaluation grid can read a sine BELOW the truth,
-  and said in words that the interpolation filter's own error was not covered. That error has now
-  been measured, against an exact reference, on the EBU's published programme material, with every
-  window read in the context of its file rather than cut out of it: the estimator can also read
-  ABOVE the truth, by up to 0.22 dB on Euroradio material.
+  The true-peak interpolator is now our own design, and the estimator says all four of its bounds as numbers.
 
   WHAT CHANGES.
 
-  Every payload that already reported `truePeakGridBoundDb` now reports `truePeakFilterGainBoundDb`
-  beside it: the most a reading can sit above the truth for a sine, computed from the filter's own
-  coefficients at first call rather than written down as a number, so it cannot drift away from the
-  code that produces it. For the Recommendation's table it is 0.222 dB, reached near a quarter of the
-  sample rate.
+  The true-peak estimator replaces the ITU-R BS.1770-4 Annex 2 table (12 taps at 4x oversampling -- the
+  Recommendation's minimum) with a 24-tap, 8x polyphase interpolator designed for this product. Measured
+  the same way on the same EBU programme material, every window read in the context of its file against an
+  exact reference: the worst under-read falls from 0.52 dB to 0.14 dB (SQAM 27, castanets) and the worst
+  over-read from 0.22 dB to 0.10 dB (SQAM 64); the standard's own fs/4 test tones read 0.13 dB low, inside
+  Tech 3341's window. `truePeakDb` MOVES on real material -- that is the point of the change.
 
-  THE BOUND SHIPS WITH ITS SCOPE. It is an OVER-read bound for the INTERIOR reading
-  (`truePeakDbInterior`): at a raw window edge `truePeakDb` can exceed it by the edge ring that
-  `truePeakEdgeDominated` already flags. It does not bound the filter's LOSS on the low side, and it
-  is derived for a sine -- a broadband transient can exceed it slightly.
+  Every disclosed bound followed the table, because each is computed from it at first call rather than
+  written down: `truePeakGridBoundDb` 0.169 dB (was 0.688), `truePeakFilterGainBoundDb` +0.086 dB (was
+  +0.222), `truePeakEdgeGuardSamples` 12 (was 6; it is taps/2).
 
-  THE DESCRIPTION NOW STATES THE MEASURED WORST CASES WITH THEIR PROVENANCE, replacing the single
-  figure 1.19.0 carried ("about 0.13 dB low", measured on a synthesised signal against a reference
-  later shown not to have converged): the standard's own true-peak test signals read up to 0.30 dB
-  low (EBU Tech 3341 case 17, inside the standard's tolerance); programme material reads up to
-  0.52 dB LOW (SQAM 27, castanets) and up to 0.22 dB HIGH (Euroradio 05), all against an exact
-  reference on the EBU's published files. A professional can bracket a reading from both sides and
-  judge whether the tolerance meets their standard, or reach for a more accurate tool.
+  TWO NEW FIELDS complete the disclosure in numbers, on every payload that carries the others:
+  `truePeakFilterLossBoundDb` (0.088 dB) -- how far the interpolation filter itself can read a sine low
+  within its passband, beyond what the grid misses; and `truePeakSineLowBoundDb` (0.127 dB, reached at a
+  quarter of the sample rate) -- the estimator's actual worst under-read of a steady sine with the grid,
+  the filter's loss and its phase error all in, tighter than the sum of the two. The passband edge ships
+  as a constant (0.45 of the sample rate) beside the table.
 
-  `truePeakDb` itself is unchanged: the header was compiled before and after and read IDENTICAL over
-  the same 12 fixtures as 1.19.0.
+  THE BOUNDS ARE FOR A SINE, and the description says so: for a sine inside the passband the interior
+  reading is never lower than the truth minus `truePeakSineLowBoundDb` and never higher than the truth
+  plus `truePeakFilterGainBoundDb`.
+
+  COST. The meter now runs one interpolation pass for both true-peak numbers where it ran two. Measured on
+  a machine a load witness certified quiet for the whole run, the new meter call takes 3.49x the previous
+  one -- about 0.4 s per minute of audio at 48 kHz, one channel, where the previous meter spent 0.11 s.

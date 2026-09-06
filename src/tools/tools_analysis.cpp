@@ -810,24 +810,43 @@ void registerAnalysisTools(ToolRegistry& reg) {
         "peak - a guarded position is excluded entirely, sample and all. Note that render bounds "
         "snap to a grid (1 ms at 48 kHz), so a window cannot be nudged by single samples to test a "
         "suspicious reading. "
-        "truePeakOversampling, truePeakGridBoundDb and truePeakFilterGainBoundDb disclose what this "
-        "estimator can and cannot resolve, on BOTH sides. It reconstructs the waveform only on a grid "
+        "truePeakOversampling, truePeakGridBoundDb, truePeakFilterLossBoundDb, truePeakSineLowBoundDb and "
+        "truePeakFilterGainBoundDb disclose what this estimator can and cannot resolve, on BOTH "
+        "sides, as numbers. It reconstructs the waveform only on a grid "
         "of 1/truePeakOversampling of a sample, so the nearest point it looks at can be half a grid "
         "step away from the real inter-sample maximum; truePeakGridBoundDb is how far a full-band "
         "sine peak can fall BELOW the truth for that reason alone, and it errs in the unsafe direction "
-        "- it reports headroom you may not have. truePeakFilterGainBoundDb is the other side: the "
+        "- it reports headroom you may not have. truePeakFilterLossBoundDb is the rest of the LOW "
+        "side: the interpolation filter attenuates slightly at some frequencies and phases within its "
+        "passband (which reaches 0.45 of the sample rate), so a peak can fall below the truth by up to "
+        "that much more; it is the worst per-phase attenuation in the passband, computed from the "
+        "filter table. For a sine inside the passband the INTERIOR reading is never lower than the "
+        "truth minus (truePeakGridBoundDb + truePeakFilterLossBoundDb); above the passband edge the "
+        "filter rolls off by design, which is not a metering error on band-limited material but is "
+        "why the number carries a scope. truePeakSineLowBoundDb is the TIGHT low side for a steady "
+        "sine: the grid, the filter's loss and the filter's phase error together, at the worst in-band "
+        "frequency and alignment, computed from the filter table - for a steady sine the INTERIOR "
+        "reading is never lower than the truth minus that, and for this table it is about half the two-number sum, "
+        "because the grid's and the filter's worst cases sit at different frequencies. It is NOT the "
+        "number for a lone transient, whose neighbours cannot rescue it; that stays inside the two-number "
+        "sum. truePeakFilterGainBoundDb is the other side: the "
         "interpolation filter has gain above unity at some frequencies, so a reading can also sit "
         "ABOVE the truth by up to that much (computed from the filter table, for a sine, for the "
         "INTERIOR reading - at a raw window edge truePeakDb can exceed it by the edge ring that "
-        "truePeakEdgeDominated flags). Stated rather than left to be found: the grid bound EXCLUDES "
-        "the filter's own loss, so the total shortfall below the truth can exceed it; both bounds "
+        "truePeakEdgeDominated flags). Stated rather than left to be found: the grid bound alone EXCLUDES "
+        "the filter's own loss, which is why the loss bound stands beside it; all four bounds "
         "are derived for a sine, which real material is not - a broadband transient can exceed the "
-        "gain bound slightly. Measured against an exact reference on the EBU's published material: the "
-        "standard's own true-peak test signals read up to 0.30 dB low (Tech 3341 case 17, inside the "
-        "standard's tolerance), and programme material reads up to 0.52 dB LOW (SQAM 27, castanets) "
-        "and up to 0.22 dB HIGH (Euroradio 05). The coefficients and the 4x factor are the loudness "
-        "standard's own, and 4x is the minimum it allows; a more accurate estimator is a design "
-        "change and a claim change, not a setting. "
+        "gain bound slightly. The interpolator is a 24-tap, 8x polyphase filter of our own design (the "
+        "loudness standard sets 4x and its own 12-tap table as the minimum; through version 1.20.0 that "
+        "minimum is what shipped). Measured against an exact reference on the EBU's published material, "
+        "every window read in its file context: the standard's own true-peak test signals read up to "
+        "0.13 dB low (Tech 3341 cases 16 and 19, at a quarter of the sample rate - the frequency and, to "
+        "three places, the value of truePeakSineLowBoundDb for this table - inside the standard's "
+        "tolerance); programme material reads up to 0.14 dB LOW (SQAM 27, castanets - the 8x grid's own "
+        "bound at the passband edge) and up to 0.10 dB HIGH (SQAM 64, a broadband transient 0.01 dB "
+        "above the sine-derived gain bound). The filter's own loss, which the grid bound excludes, is "
+        "truePeakFilterLossBoundDb - about 0.09 dB for this table. The previous estimator read up to 0.52 dB low and "
+        "0.22 dB high on the same material. "
         "Runs ONE bounded, non-destructive analysis render "
         "(snapshots + restores every RENDER_* field + selection; the temp file is deleted after "
         "reading) using the measure-don't-limit config, so a headroomed master is measured exactly. "
@@ -849,7 +868,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
             "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
             "truePeakEdgeGuardSamples":{"type":"integer"},"window":{"type":"object"},
-            "truePeakOversampling":{"type":"integer"},"truePeakGridBoundDb":{"type":"number"},"truePeakFilterGainBoundDb":{"type":"number"},
+            "truePeakOversampling":{"type":"integer"},"truePeakGridBoundDb":{"type":"number"},"truePeakFilterLossBoundDb":{"type":"number"},"truePeakSineLowBoundDb":{"type":"number"},"truePeakFilterGainBoundDb":{"type":"number"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "plan":{"type":"string"},"dryRun":{"type":"boolean"},
@@ -1332,7 +1351,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"boundsFlag", boundsFlag}, {"program", program}, {"window", window},
                         {"channelsDetail", chDetail}, {"downmix", downmix},
                         {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
-                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterLossBoundDb", meter::truePeakFilterLossBoundDb()}, {"truePeakSineLowBoundDb", meter::truePeakSineLowBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
                         {"measuredSource", "render+samples"}, {"rate", rate},
                         {"renderSilence", renderSilence}, {"crossRead", crossRead},
                         {"rawStats", f0.contains("stats") ? f0["stats"] : Json::object()},
@@ -1668,7 +1687,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                {"lufsIntegrated", r2(bestLufs)}};
             return Json{{"stems", stemJson}, {"loudest", loudest}, {"count", (int)stemJson.size()},
                         {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
-                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterLossBoundDb", meter::truePeakFilterLossBoundDb()}, {"truePeakSineLowBoundDb", meter::truePeakSineLowBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"warnings", warnings}};
 #else
@@ -1818,7 +1837,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                                    "stem (gates drop inter-phrase silence). Approximation is honest "
                                    "only if the stem carries dialog exclusively."},
                         {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
-                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterLossBoundDb", meter::truePeakFilterLossBoundDb()}, {"truePeakSineLowBoundDb", meter::truePeakSineLowBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
                         {"measuredSource", "render-stats + render+samples"},
                         {"warnings", warnings}};
 #else
@@ -1971,7 +1990,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"deltas", Json{{"stereoVsMultichannelLu", r2(stereoVsMulti)},
                                         {"monoVsStereoLu", r2(monoVsStereo)}}},
                         {"interpretation", interp}, {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
-                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterLossBoundDb", meter::truePeakFilterLossBoundDb()}, {"truePeakSineLowBoundDb", meter::truePeakSineLowBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"warnings", warnings}};
 #else
@@ -2310,7 +2329,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             return Json{{"objects", objJson}, {"loudest", loudest}, {"count", (int)objJson.size()},
                         {"bed", bedJson}, {"bedVsObjects", bedVsObjects},
                         {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
-                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterLossBoundDb", meter::truePeakFilterLossBoundDb()}, {"truePeakSineLowBoundDb", meter::truePeakSineLowBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
                         {"measuredSource", "render+samples (C++ BS.1770-4 gated)"},
                         {"interpretation", interp}, {"warnings", warnings}};
 #else
@@ -2465,7 +2484,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
                         {"midSide", Json{{"midRmsDb", r2(mm.rmsDb)}, {"sideRmsDb", r2(sm.rmsDb)},
                                          {"sideToMidDb", r2(sideToMid)}}},
                         {"interpretation", interp}, {"boundsFlag", boundsFlag}, {"truePeakEdgeGuardSamples", meter::kTruePeakEdgeGuard},
-                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
+                        {"truePeakOversampling", meter::kTruePeakOversampling}, {"truePeakGridBoundDb", meter::truePeakGridBoundDb()}, {"truePeakFilterLossBoundDb", meter::truePeakFilterLossBoundDb()}, {"truePeakSineLowBoundDb", meter::truePeakSineLowBoundDb()}, {"truePeakFilterGainBoundDb", meter::truePeakFilterGainBoundDb()},
                         {"measuredSource", "render-stats + render+samples"},
                         {"warnings", warnings}};
 #else
@@ -2923,6 +2942,8 @@ void registerAnalysisTools(ToolRegistry& reg) {
             out["truePeakEdgeGuardSamples"] = meter::kTruePeakEdgeGuard;   // the width used
             out["truePeakOversampling"] = meter::kTruePeakOversampling;
             out["truePeakGridBoundDb"]  = meter::truePeakGridBoundDb();
+            out["truePeakFilterLossBoundDb"] = meter::truePeakFilterLossBoundDb();
+            out["truePeakSineLowBoundDb"] = meter::truePeakSineLowBoundDb();
             out["truePeakFilterGainBoundDb"] = meter::truePeakFilterGainBoundDb();
             out["measuredSource"] = "accessor";
             if (optBool(a, "overview", false)) {
@@ -3038,6 +3059,8 @@ void registerAnalysisTools(ToolRegistry& reg) {
             out["truePeakEdgeGuardSamples"] = meter::kTruePeakEdgeGuard;   // the width used
             out["truePeakOversampling"] = meter::kTruePeakOversampling;
             out["truePeakGridBoundDb"]  = meter::truePeakGridBoundDb();
+            out["truePeakFilterLossBoundDb"] = meter::truePeakFilterLossBoundDb();
+            out["truePeakSineLowBoundDb"] = meter::truePeakSineLowBoundDb();
             out["truePeakFilterGainBoundDb"] = meter::truePeakFilterGainBoundDb();
             out["measuredSource"] = "accessor";
             Json warnings = Json::array();
@@ -3712,7 +3735,7 @@ void registerAnalysisTools(ToolRegistry& reg) {
             "program":{"type":"object"},"channelsDetail":{"type":"array"},
             "downmix":{"type":"object"},"measuredSource":{"type":"string"},"rate":{"type":"object"},
             "truePeakEdgeGuardSamples":{"type":"integer"},"window":{"type":"object"},
-            "truePeakOversampling":{"type":"integer"},"truePeakGridBoundDb":{"type":"number"},"truePeakFilterGainBoundDb":{"type":"number"},
+            "truePeakOversampling":{"type":"integer"},"truePeakGridBoundDb":{"type":"number"},"truePeakFilterLossBoundDb":{"type":"number"},"truePeakSineLowBoundDb":{"type":"number"},"truePeakFilterGainBoundDb":{"type":"number"},
             "rawStats":{"type":"string"},"boundsFlag":{"type":"integer"},
             "renderSilence":{"type":"object"},"crossRead":{"type":"object"},
             "revive":{"type":"object"},"beforeRevive":{"type":"object"},

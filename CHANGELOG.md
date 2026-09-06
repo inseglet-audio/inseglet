@@ -6,6 +6,67 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.21.0] — the true-peak interpolator is ours, the number moves, and the disclosure is complete in numbers (2026-09-06)
+
+### Added
+- **`truePeakFilterLossBoundDb` on every payload that carries `truePeakGridBoundDb` and
+  `truePeakFilterGainBoundDb`** (the same ten sites, derived by the apply script). 1.20.0 stated both
+  sides of the estimator's error, but only one of them entirely in numbers: the filter's own LOSS — how
+  far the interpolation filter itself can read a peak low, beyond what the grid misses — was a sentence
+  in the description ("up to 0.09 dB per phase"). It is now the third field: the worst per-phase
+  attenuation of the tabulated filter within its passband (to 0.45 fs), **computed from the table at
+  first call, never a literal**, so that for a sine inside the passband the interior reading is never
+  lower than the truth minus (`truePeakGridBoundDb` + `truePeakFilterLossBoundDb`). The unit test asserts
+  that on a tone at fs/4 (where a long tone cannot be rescued by a later cycle) the meter reads within
+  0.002 dB of the grid's and the filter's loss at that frequency — the residual is the filter's phase
+  error, a third and smaller low-side contribution — that the two fields together cover the meter's worst
+  reading, that the field covers the measured low-side worst cases, and that a PLANTED table moves it by
+  exactly the planted amount — a literal, or a function that ignored its table, would fail.
+- **The passband edge ships as a constant beside the table** (`kTruePeakPassbandEdge`, 0.45 fs — the
+  design's own edge), with a test that it describes the table: the loss just inside it is small and the
+  roll-off at fs/2 is large, so the two cannot drift apart unnoticed. The description says why the number
+  carries a scope: above the edge the filter rolls off by design, which is not a metering error on
+  band-limited material.
+- **`truePeakSineLowBoundDb` on the same ten sites — the TIGHT low side for a steady sine.** The two
+  low-side numbers above are honest worst cases at DIFFERENT frequencies (the grid's at fs/2, the
+  filter's at the passband edge), so their sum (0.256 dB for this table) is about twice what the
+  estimator can actually do to a steady sine. The fourth field is that actual worst case — the grid, the
+  filter's loss and the filter's PHASE error (which moves each phase's effective sampling instant) all in,
+  at the worst in-band frequency and alignment — **computed from the table at first call, never a
+  literal**: 0.127 dB for this table, at fs/4, the frequency at which a steady tone never gets a second
+  look and the standard's own test tones live. The unit test drives the METER with long tones at two
+  frequencies of that family and asserts the model reproduces it within 5e-4 dB, that six other in-band
+  frequencies (the passband edge among them) never read lower, that a planted table moves the number by
+  exactly the planted amount and a planted instant error raises it. The description says what the number
+  is NOT: the number for a lone transient, which stays inside the two-field sum.
+
+### Changed — A CLAIM CHANGE
+- **The true-peak estimator is now a 24-tap, 8x polyphase interpolator of our own design**, replacing
+  ITU-R BS.1770-4 Annex 2's 12-tap, 4x table (the Recommendation's minimum, which shipped through
+  1.20.0). Measured the same way on the same EBU material (every window in its file context, against
+  an exact reference): worst error **0.137 dB low** (SQAM 27, castanets) from 0.522, and up to
+  **0.097 dB high** (SQAM 64) from 0.216; the standard's own fs/4 test tones read 0.127 dB low, inside
+  Tech 3341's window. The 0.137 is the 8x grid's own bound at the passband edge — what an accurate
+  filter leaves. The design was evaluated against a per-phase minimax family (16/20/24/32 taps,
+  4x/8x/16x) before it was chosen; the header records what each dial buys.
+- **Every disclosed bound followed the table**, because they are computed from it: `truePeakGridBoundDb`
+  now reads 0.1685 (was 0.6877), `truePeakFilterGainBoundDb` +0.086 (was +0.222),
+  `truePeakEdgeGuardSamples` 12 (was 6; it is taps/2). The description states this table's measured
+  worst cases and the filter's per-phase loss (up to 0.09 dB), which the grid bound excludes.
+- **Cost, structurally:** 192 multiply-adds per input sample against 48 — four times the interpolation
+  work, in the one pass the meter now makes for both true-peak numbers. **Cost, measured:** on a machine a
+  load witness certified quiet for the whole run (every other process's CPU time sampled throughout; the
+  reading refused whenever the machine was not quiet), the fused 8×24 meter call took **3.49×** the
+  fused 4×12's on 349 s of Euroradio programme material at 48 kHz, one channel (2318 ms against
+  663 ms, each the minimum of 5 repeats) — below the structural 4× because the call also computes RMS,
+  K-weighting and the sample peak.
+
+### Unchanged
+- The sample-peak floor, the edge guard's derivation (taps/2), both edge-guarded readings and the flag,
+  and every field name. `truePeakDb` MOVES on real material (that is the point), and the unit tests
+  that pinned the old table's data (the raw-edge ring, the 4x measured over-read) are re-derived for
+  this one.
+
 ## [1.20.0] — the true-peak reading says how much it cannot see, on BOTH sides (2026-09-05)
 
 ### Added

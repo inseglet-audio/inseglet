@@ -221,8 +221,12 @@ int main() {
         check(mr.truePeakInteriorValid && mt.truePeakInteriorValid, "edge guard: both fixtures have an interior");
         check(mr.truePeakEdgeDominated,  "raw-edged buffer: truePeakEdgeDominated is TRUE");
         check(!mt.truePeakEdgeDominated, "tapered buffer: truePeakEdgeDominated is FALSE");
-        check(near(mr.truePeakDb - mr.truePeakDbInterior, 0.7096, 0.01),
-              "raw-edged buffer: the ring the two numbers disclose is ~+0.71 dB");
+        // ⛔ THE RING IS A PROPERTY OF THE TABLE.  With the Recommendation's 4x12 table (through 1.20.0)
+        //    this fixture read +0.7096 dB; with the 8x24 table it reads +0.6954 dB -- measured through the
+        //    product on the day the table changed, and the first build of that change found the old datum
+        //    by failing here, which is what a pinned datum is for.  Re-pinned, not loosened.
+        check(near(mr.truePeakDb - mr.truePeakDbInterior, 0.6954, 0.01),
+              "raw-edged buffer: the ring the two numbers disclose is ~+0.70 dB for the 8x24 table (was +0.71 at 4x12)");
         check(near(mt.truePeakDb - mt.truePeakDbInterior, 0.0, 1e-9),
               "tapered buffer: the two numbers agree exactly");
 
@@ -266,6 +270,54 @@ int main() {
         check(ml.truePeakEdgeDominated, "lone edge sample: the flag names it");
     }
 
+    // ---- 3c-bis. the fused pass is BIT-IDENTICAL to the two passes it replaced ----
+    {
+        // analyzeChannel() now folds every position into both maxima in ONE pass of the interpolator.
+        // The two-pass functions it replaced are still public; this asserts EXACT equality (==, not a
+        // tolerance) between the fused numbers and theirs over fixtures that exercise every branch:
+        // the five Tech 3341 sines, a raw-edged sine, a lone edge sample, noise, silence, a buffer with
+        // no interior and one with the least interior.  A tolerance here would hide a fuse that was
+        // merely close; the claim is that it is the same arithmetic.
+        std::vector<std::pair<std::string, AudioBuffer>> fx;
+        const size_t nf = (size_t)(sr * 0.010);
+        struct TP { const char* id; double fOverFs, amp, phaseDeg; } cases[] = {
+            {"15", 0.25, 0.50, 0.0}, {"16", 0.25, 0.50, 45.0}, {"17", 1.0 / 6, 0.50, 60.0},
+            {"18", 0.125, 0.50, 67.5}, {"19", 0.25, 1.41, 45.0}};
+        for (const auto& c : cases) {
+            AudioBuffer b = makeBuffer(1, sr, N);
+            for (size_t i = 0; i < N; ++i) {
+                double g = 1.0;
+                if (i < nf)          g = 0.5 - 0.5 * std::cos(M_PI * (double)i / (double)nf);
+                else if (i >= N - nf) g = 0.5 - 0.5 * std::cos(M_PI * (double)(N - 1 - i) / (double)nf);
+                setSample(b, i, 0, g * c.amp * std::sin(2 * M_PI * c.fOverFs * (double)i + c.phaseDeg * M_PI / 180.0));
+            }
+            fx.emplace_back(std::string("3341-") + c.id, b);
+        }
+        { AudioBuffer b = makeBuffer(1, sr, N); for (size_t i = 0; i < N; ++i) setSample(b, i, 0, 0.5 * std::sin(2 * M_PI * 0.125 * (double)i + 67.5 * M_PI / 180.0)); fx.emplace_back("raw-edged sine", b); }
+        { AudioBuffer b = makeBuffer(1, sr, N); setSample(b, 0, 0, 1.0); fx.emplace_back("lone edge sample", b); }
+        { AudioBuffer b = makeBuffer(1, sr, N); uint32_t r = 12345u; for (size_t i = 0; i < N; ++i) { r = r * 1664525u + 1013904223u; setSample(b, i, 0, 0.5 * ((double)(r >> 8) / 16777216.0 * 2.0 - 1.0)); } fx.emplace_back("noise", b); }
+        { AudioBuffer b = makeBuffer(1, sr, N); fx.emplace_back("silence", b); }
+        { AudioBuffer b = makeBuffer(1, sr, (size_t)(2 * kTruePeakEdgeGuard)); for (size_t i = 0; i < b.frames; ++i) setSample(b, i, 0, (i % 2) ? -0.5 : 0.5); fx.emplace_back("no interior", b); }
+        { AudioBuffer b = makeBuffer(1, sr, (size_t)(2 * kTruePeakEdgeGuard + 1)); for (size_t i = 0; i < b.frames; ++i) setSample(b, i, 0, (i % 2) ? -0.5 : 0.5); fx.emplace_back("least interior", b); }
+        int identical = 0;
+        for (const auto& f : fx) {
+            ChannelMetrics m = analyzeChannel(f.second, 0);
+            const double two = truePeakDb(f.second, 0);
+            double twoInterior = kMinDb(); const bool twoValid = truePeakDbInterior(f.second, 0, twoInterior);
+            const bool same = (m.truePeakDb == two) && (m.truePeakInteriorValid == twoValid) &&
+                              (!twoValid || m.truePeakDbInterior == twoInterior);
+            check(same, "fused pass == two passes, bit-identical, on fixture '" + f.first + "'");
+            if (same) ++identical;
+        }
+        check(identical == (int)fx.size(), "fused pass identical on ALL " + std::to_string(fx.size()) + " fixtures");
+        // NEGATIVE, so the equality above is not a clean null: the guarded interior of the raw-edged
+        // sine is BELOW the whole-buffer reading (the edge ring), i.e. the two numbers the fuse
+        // computes are genuinely different quantities, not one number copied twice.
+        ChannelMetrics mr = analyzeChannel(fx[5].second, 0);
+        check(mr.truePeakInteriorValid && mr.truePeakDbInterior < mr.truePeakDb - 0.1,
+              "fused: the interior and whole-buffer maxima DIFFER on the raw-edged fixture (not one number twice)");
+    }
+
     // ---- 3d. the estimator DISCLOSES its own ceiling ----
     {
         // The 4x estimator evaluates the reconstructed waveform on a grid of 1/OS of a sample, so
@@ -279,13 +331,30 @@ int main() {
         check(std::fabs(b - closed) < 1e-12, "grid bound == -20 log10 cos(pi/(2*OS))");
         //  (b) it is POSITIVE and SMALL -- a sign error here would tell a user the meter reads high.
         check(b > 0.0 && b < 3.0, "grid bound is a positive, small number of dB");
-        //  (c) THE ONE MEASURED DATUM SITS INSIDE IT.  An independent 64x reference read a true
-        //      peak 0.133863 dB above this meter on fs/4 content; the same closed form at fs/4 is
-        //      0.1685 dB.  If a future change made the bound tighter than the error we have
-        //      actually observed, the disclosure would be a false reassurance -- which is worse
-        //      than no disclosure.  ⚠️ n = 1, and this test says so rather than implying more.
-        const double atQuarter = -20.0 * std::log10(std::cos(2.0 * M_PI * 0.25 / (2.0 * (double)kTruePeakOversampling)));
-        check(atQuarter > 0.133863, "the fs/4 bound still covers the one measured shortfall (n=1)");
+        //  (c) THE MEASURED LOW SIDE SITS INSIDE grid + filter loss, FOR THIS TABLE.  Two data, both in
+        //      context against an exact reference on the EBU's published files: the fs/4 tones (Tech
+        //      3341 cases 16/19) read 0.126620 dB low; castanets (SQAM 27, content at the passband edge)
+        //      reads 0.136516 dB low.  The LOW side is the grid bound at the signal's frequency PLUS the
+        //      filter's worst per-phase loss over the passband -- the loss is computed HERE from the
+        //      table (max over phases and 0..0.45 fs of -20 log10 |H_p|), not read from the header.
+        //      If a future table made grid + loss tighter than an error already observed, the
+        //      disclosure would be a false reassurance, which is worse than none.
+        {
+            const auto ph = truePeakPolyphase(); const int taps = (int)ph[0].size(), half = taps / 2;
+            double lossDb = 0.0;
+            for (int k = 0; k <= 900; ++k) {
+                const double f = 0.45 * k / 900.0, w = 2 * M_PI * f;
+                for (const auto& hp : ph) { double re = 0, im = 0;
+                    for (int tt = 0; tt < taps; ++tt) { const double m = tt - half + 1; re += hp[tt] * std::cos(w * m); im += hp[tt] * std::sin(w * m); }
+                    lossDb = std::max(lossDb, -20.0 * std::log10(std::sqrt(re * re + im * im))); }
+            }
+            const double gridQuarter = -20.0 * std::log10(std::cos(2.0 * M_PI * 0.25 / (2.0 * (double)kTruePeakOversampling)));
+            const double gridEdge    = -20.0 * std::log10(std::cos(2.0 * M_PI * 0.45 / (2.0 * (double)kTruePeakOversampling)));
+            check(lossDb > 0.0 && lossDb < 0.2, "the filter's worst per-phase passband loss is positive and small (computed from the table)");
+            check(gridQuarter + lossDb >= 0.126620, "grid(fs/4) + filter loss covers the measured fs/4 tone shortfall (cases 16/19)");
+            check(gridEdge + lossDb >= 0.136516, "grid(0.45 fs) + filter loss covers the measured castanets shortfall (SQAM 27)");
+            check(gridEdge <= 0.136516 + 0.001, "castanets reads AT the grid bound: an accurate filter leaves the grid (within 0.001 dB)");
+        }
         // (d) the phase table really has OS rows -- the loop's factor and the disclosed factor are
         //     the same number, which is the drift this constant exists to prevent.
         check((int)truePeakPolyphase().size() == kTruePeakOversampling,
@@ -329,11 +398,192 @@ int main() {
             //       filter on the signal; an edge is not the signal, and truePeakEdgeDominated is the flag.
             check(worstWhole > worst, "SCOPE: the whole-buffer reading exceeds the interior at a raw edge, so the bound is for the interior");
         }
-        //  (g) THE MEASURED PROGRAMME OVER-READ SITS INSIDE IT: an exact-reference measurement read +0.215802 dB on EBU
-        //      Euroradio 05 against an exact reference, in context.  If a future table change made the
-        //      bound tighter than an over-read already observed, the disclosure would be a false
-        //      reassurance.  One material, stated as such.
-        check(0.215802 <= g, "the disclosed over-read bound covers the measured programme over-read (euro-05)");
+        //  (g) THE MEASURED PROGRAMME OVER-READ, FOR THIS TABLE, AND WHAT THE SCOPE SENTENCE SAYS ABOUT IT:
+        //      SQAM 64 read +0.096820 dB high in context against an exact reference -- ABOVE the sine
+        //      bound, because a broadband transient is not a sine (the phases' phase error can align
+        //      components better than the input had them).  The description says the excess exists and
+        //      is slight; this asserts BOTH halves, so the sentence is neither vacuous nor understated.
+        //      (For the 4x table the datum was +0.215802 on Euroradio 05, inside its +0.222 bound.)
+        check(0.096820 > g, "the measured programme over-read (SQAM 64) EXCEEDS the sine bound -- the scope sentence is not vacuous");
+        check(0.096820 - g < 0.02, "and the excess is slight (< 0.02 dB), as the description says");
+        // ---- 3d, continued: the THIRD number -- the filter's LOSS, as a field ----
+        //  (h) sign, size and place: the loss bound is positive (a sign error would say the filter has
+        //      gain), small, and smaller than the grid bound for this table; and the field IS the
+        //      function of (the shipped table, the shipped edge) -- nothing else feeds it.
+        const double lossB = truePeakFilterLossBoundDb();
+        check(lossB > 0.0 && lossB < 0.2, "filter-loss bound is positive and small");
+        check(lossB < b, "filter-loss bound is smaller than the grid bound, for this table");
+        check(std::fabs(lossB - truePeakFilterLossBoundDbOf(truePeakPolyphase(), kTruePeakPassbandEdge)) < 1e-12,
+              "the field is the function of the shipped table and the shipped passband edge");
+        //  (i) IT AGREES WITH THIS FILE'S OWN INDEPENDENT SCAN -- (c) above computes the same maximum on a
+        //      901-point grid; re-derived here so this block is self-contained.  The two scans are written
+        //      separately and could disagree; a maximum can only be reached from below by a coarser grid.
+        {
+            const auto ph = truePeakPolyphase(); const int taps = (int)ph[0].size(), half = taps / 2;
+            double lossGrid = 0.0;
+            for (int k = 0; k <= 900; ++k) {
+                const double f = kTruePeakPassbandEdge * k / 900.0, w = 2 * M_PI * f;
+                for (const auto& hp : ph) { double re = 0, im = 0;
+                    for (int tt = 0; tt < taps; ++tt) { const double m = tt - half + 1; re += hp[tt] * std::cos(w * m); im += hp[tt] * std::sin(w * m); }
+                    lossGrid = std::max(lossGrid, -20.0 * std::log10(std::sqrt(re * re + im * im))); }
+            }
+            check(lossGrid <= lossB + 1e-9, "the field is never smaller than the coarse independent scan (it is a maximum)");
+            check(lossB - lossGrid < 1e-6, "and the coarse scan reaches it within 1e-6 dB (for this table the worst is at the edge)");
+        }
+        //  (j) THE FIELD COVERS THE MEASURED LOW-SIDE DATA -- (c) proved grid + loss covers them with the loss
+        //      computed by the test; this proves the number a USER receives does.
+        {
+            const double gridQ = -20.0 * std::log10(std::cos(2.0 * M_PI * 0.25 / (2.0 * (double)kTruePeakOversampling)));
+            const double gridE = -20.0 * std::log10(std::cos(2.0 * M_PI * kTruePeakPassbandEdge / (2.0 * (double)kTruePeakOversampling)));
+            check(gridQ + lossB >= 0.126620, "grid(fs/4) + the FIELD covers the measured fs/4 tone shortfall (cases 16/19)");
+            check(gridE + lossB >= 0.136516, "grid(edge) + the FIELD covers the measured castanets shortfall (SQAM 27)");
+        }
+        //  (k) THE LOW-SIDE BOUND IS TIGHT AGAINST THE METER ITSELF, AT fs/4.  A long sine at fs/4 samples the
+        //      same four positions for ever, so a peak that falls midway between two interpolated phases is
+        //      never rescued by a later cycle (at any other frequency it is: a long tone defeats a single-peak
+        //      bound).  Driven through the INTERIOR reading at 32 alignments (steps of 1/8 sample), the worst
+        //      reading is truth - (grid(fs/4) + loss(fs/4)) within 0.002 dB ON EITHER SIDE.  ⛔ EITHER SIDE,
+        //      because the first build of this test asserted "never below it" and FAILED -- correctly: the
+        //      meter read 0.000831 dB BELOW grid + loss.  grid + loss is an ideal-delay MODEL; the filter's
+        //      PHASE error moves each phase's effective sampling instant (phase 3 sits at 0.436884 of a
+        //      sample at fs/4, not 0.4375), and that is a THIRD low-side contribution, small here.  The
+        //      guarantee the description states is the FIELD-level one, asserted last: the sum of the two
+        //      fields covers the true single-peak worst case anywhere in the passband (0.127 dB, at fs/4, for
+        //      this table) with room, because the grid bound is taken at fs/2 and the loss bound at the edge.
+        {
+            const auto ph = truePeakPolyphase(); const int taps = (int)ph[0].size(), half = taps / 2;
+            const double w = 2 * M_PI * 0.25; double gmin = 1e300;
+            for (const auto& hp : ph) { double re = 0, im = 0;
+                for (int tt = 0; tt < taps; ++tt) { const double m = tt - half + 1; re += hp[tt] * std::cos(w * m); im += hp[tt] * std::sin(w * m); }
+                gmin = std::min(gmin, std::sqrt(re * re + im * im)); }
+            const double lossQ = -20.0 * std::log10(gmin);
+            const double gridQ = -20.0 * std::log10(std::cos(2.0 * M_PI * 0.25 / (2.0 * (double)kTruePeakOversampling)));
+            check(lossQ <= lossB + 1e-12, "the loss at fs/4 is inside the passband maximum");
+            double worst = 1e9;
+            for (int o = 0; o < 32; ++o) {
+                AudioBuffer sn = makeBuffer(1, sr, 4096);
+                for (size_t i = 0; i < 4096; ++i) setSample(sn, i, 0, std::sin(2 * M_PI * 0.25 * i + 2 * M_PI * o / 32.0));
+                double interior = 0.0;
+                const bool valid = truePeakDbInterior(sn, 0, interior);
+                check(valid, "the interior reading is valid on a 4096-sample buffer (fs/4)");
+                worst = std::min(worst, interior);                   // truth is 0 dBFS
+            }
+            check(std::fabs(worst + (gridQ + lossQ)) < 0.002, "at fs/4 the meter's worst alignment is within 0.002 dB of grid + loss, on either side (the residual is the filter's PHASE error)");
+            check(worst >= -(b + lossB) - 1e-5, "and the FIELD-level bound (grid bound + loss bound) covers it, as the description promises");
+        }
+        //  (l) A PLANTED TABLE MOVES IT.  The same table scaled by 0.99 in every coefficient loses a further
+        //      20 log10(1/0.99) = 0.0873 dB at every frequency and phase, so the function of (table, edge) must
+        //      read the shipped value + 0.0873 within 1e-9; a function that ignored its table, or a literal,
+        //      would not move.  And the EDGE is a parameter the constant must agree with: at fs/2 the shipped
+        //      table has rolled off by several dB, so a constant that named 0.5 as the edge would report a
+        //      "loss bound" that is not a metering error at all -- asserted, so the constant and the table
+        //      cannot drift apart without a test noticing.
+        {
+            auto planted = truePeakPolyphase();
+            for (auto& hp : planted) for (auto& coef : hp) coef *= 0.99;
+            const double moved = truePeakFilterLossBoundDbOf(planted, kTruePeakPassbandEdge);
+            check(std::fabs(moved - (lossB - 20.0 * std::log10(0.99))) < 1e-9, "a planted table (every coefficient x 0.99) MOVES the loss bound by exactly 20 log10(1/0.99)");
+            check(truePeakFilterLossBoundDbOf(truePeakPolyphase(), 0.5) > 3.0, "the edge is real: naming fs/2 as the passband edge would read a multi-dB 'loss' (the roll-off), so the constant describes the table");
+            check(truePeakFilterLossBoundDbOf(truePeakPolyphase(), kTruePeakPassbandEdge) < 0.2, "and just inside the shipped edge the loss is small");
+        }
+        // ---- 3d, continued: the FOURTH number -- the tight low side for a steady sine ----
+        //  (m) sign, size and place: positive; at most the two fields' sum (it is the tight version of that
+        //      sum, not a fifth mechanism); at least grid(f*) + loss(f*) at its own frequency minus a hair (the
+        //      phase term can only add for this table -- (k) measured it adding 0.0008 dB); the field IS the
+        //      function of (the shipped table, the shipped edge); its frequency is a member of the family.
+        const double sineB = truePeakSineLowBoundDb(), fStar = truePeakSineLowBoundFrequency();
+        check(sineB > 0.0 && sineB < 0.5, "sine low bound is positive and small");
+        check(sineB <= b + lossB + 1e-9, "the tight number is inside the two fields' sum, as the description promises");
+        check(sineB < 0.75 * (b + lossB), "and materially tighter than it, for this table (the point of the field)");
+        check(std::fabs(sineB - truePeakSineLowBoundOf(truePeakPolyphase(), kTruePeakPassbandEdge).db) < 1e-12, "the field is the function of the shipped table and the shipped passband edge");
+        check(fStar > 0.0 && fStar <= kTruePeakPassbandEdge, "the worst frequency is inside the passband");
+        check(std::fabs(fStar - 0.25) < 1e-12, "for this table the worst frequency is fs/4 (the standard's own test-tone frequency)");
+        {
+            const double w = 2 * M_PI * fStar; double gmin = 1e300;
+            const auto ph = truePeakPolyphase(); const int taps = (int)ph[0].size(), half = taps / 2;
+            for (const auto& hp : ph) { double re = 0, im = 0;
+                for (int tt = 0; tt < taps; ++tt) { const double m = tt - half + 1; re += hp[tt] * std::cos(w * m); im += hp[tt] * std::sin(w * m); }
+                gmin = std::min(gmin, std::sqrt(re * re + im * im)); }
+            const double gridF = -20.0 * std::log10(std::cos(2.0 * M_PI * fStar / (2.0 * (double)kTruePeakOversampling)));
+            check(sineB >= gridF - 20.0 * std::log10(gmin) - 1e-6, "at its own frequency the field is at least grid + loss there: the phase term is IN it, not dropped");
+        }
+        //  (n) IT AGREES WITH THIS FILE'S OWN INDEPENDENT SCAN at the worst frequency -- a 4000-point EVEN position
+        //      scan of one extremum against the raw sample and every phase at its effective instant (the
+        //      arg H / w model, the effective-instant one), written here separately.  A coarser grid can only read a minimum from
+        //      above (a smaller under-read); the field must never be smaller than it and must reach it closely.
+        {
+            const auto ph = truePeakPolyphase(); const int taps = (int)ph[0].size(), half = taps / 2, P = (int)ph.size();
+            const double w = 2 * M_PI * fStar; const int m = (int)std::lround(1.0 / (2.0 * fStar));   // fs/4 = fs/(2m), m = 2: ONE offset
+            std::vector<double> mag(P + 1, 1.0), tau(P + 1, 0.0);
+            for (int q = 0; q < P; ++q) { double re = 0, im = 0;
+                for (int tt = 0; tt < taps; ++tt) { const double mm = tt - half + 1; re += ph[q][tt] * std::cos(w * mm); im += ph[q][tt] * std::sin(w * mm); }
+                mag[q + 1] = std::sqrt(re * re + im * im); tau[q + 1] = std::atan2(im, re) / w; }
+            double worstRead = 1e300;
+            for (int k = 0; k < 4000; ++k) { const double p = k / 4000.0; double best = 0.0;
+                for (int n = -(m / 2 + 2); n <= m / 2 + 2; ++n) for (int g = 0; g <= P; ++g) best = std::max(best, mag[g] * std::fabs(std::cos(w * (n + tau[g] - p))));
+                worstRead = std::min(worstRead, best); }
+            const double scan = -20.0 * std::log10(worstRead);
+            check(scan <= sineB + 1e-9, "the field is never smaller than the coarse independent scan (it is a maximum of minima)");
+            check(sineB - scan < 1e-6, "and the coarse scan reaches it within 1e-6 dB (the worst alignment is on a 4000-point grid for this table)");
+        }
+        //  (o) THE MODEL IS THE METER.  Long tones through the INTERIOR reading, 32 alignments in steps of 1/32 of a
+        //      sample, at FOUR frequencies whose extrema visit one, one, two and four grid offsets: at the worst
+        //      frequency (fs/4) the meter's worst alignment reaches the FIELD within 5e-4 dB; at fs/6, fs/3 and 2fs/5
+        //      it reaches each frequency's own W(a, b) within 5e-4 dB -- the effective-instant model reproduces the
+        //      meter in four places, two of them tones the grid DOES get a second look at (the rule: execute the thing
+        //      the assertion is about; this beat's first reference model skipped every odd denominator and the meter
+        //      drive caught it).  Then at FOUR other in-band frequencies -- the passband edge, 5fs/12, 3fs/8, 3fs/10
+        //      -- the meter never reads lower than the truth minus the field.
+        {
+            auto worstInterior = [&](double f) {
+                double worst = 1e9;
+                for (int o = 0; o < 32; ++o) {
+                    AudioBuffer sn = makeBuffer(1, sr, 4096);
+                    for (size_t i = 0; i < 4096; ++i) setSample(sn, i, 0, std::sin(2 * M_PI * f * ((double)i + o / 32.0)));
+                    double interior = 0.0;
+                    const bool valid = truePeakDbInterior(sn, 0, interior);
+                    check(valid, "the interior reading is valid on a 4096-sample buffer");
+                    worst = std::min(worst, interior);                   // truth is 0 dBFS
+                }
+                return worst;
+            };
+            const double atStar = worstInterior(fStar);
+            check(std::fabs(atStar + sineB) < 5e-4, "at the worst frequency the meter's worst alignment reaches the FIELD within 5e-4 dB: the model is the meter");
+            struct AB { int a, b; const char* what; };
+            const AB members[] = { {1, 6, "fs/6 (one offset)"}, {1, 3, "fs/3 (two offsets)"}, {2, 5, "2fs/5 (four offsets)"} };
+            for (const AB& m : members) {
+                const double wab = truePeakSineWorstDbOf(truePeakPolyphase(), m.a, m.b), at = worstInterior((double)m.a / m.b);
+                check(std::fabs(at + wab) < 5e-4, std::string("at ") + m.what + " the meter reaches that frequency's own W(a, b) within 5e-4 dB: the model is the meter there too");
+                check(wab < sineB, std::string(m.what) + " reads better than the worst frequency for this table (the maximum is the field)");
+            }
+            const double others[] = { kTruePeakPassbandEdge, 5.0 / 12.0, 3.0 / 8.0, 0.3 };
+            for (double f : others) {
+                const double wf = worstInterior(f);
+                check(wf >= -sineB - 1e-4, "a steady tone at an in-band frequency off the family never reads lower than the truth minus the field (the edge among them)");
+            }
+        }
+        //  (p) A PLANTED TABLE MOVES IT, AND A PLANTED INSTANT MOVES IT.  x0.99 on every coefficient: exactly
+        //      20 log10(1/0.99) more (the raw sample does not scale, but it is not the winning instant at the worst
+        //      alignment).  Phase 3 made a COPY of phase 2: two phases on one instant, the gap to phase 4 doubled,
+        //      magnitudes those of a shipped phase -- the number must RISE, which a computation that read magnitudes
+        //      and ignored instants would not show.  (A whole-sample delay of a phase is invisible to a 1-periodic
+        //      lattice and was the first draft of this control; the reference model keeps that reading.)
+        {
+            auto planted = truePeakPolyphase();
+            for (auto& hp : planted) for (auto& coef : hp) coef *= 0.99;
+            const double moved = truePeakSineLowBoundOf(planted, kTruePeakPassbandEdge).db;
+            check(std::fabs(moved - (sineB - 20.0 * std::log10(0.99))) < 1e-6, "a planted table (every coefficient x 0.99) MOVES the sine low bound by exactly 20 log10(1/0.99)");
+            auto instant = truePeakPolyphase(); instant[3] = instant[2];
+            const double risen = truePeakSineLowBoundOf(instant, kTruePeakPassbandEdge).db;
+            check(risen - sineB > 0.05, "a planted INSTANT error (phase 3 a copy of phase 2) RAISES the bound by more than 0.05 dB: the effective instants are in the computation");
+        }
+        //  (q) THE EDGE IS REAL.  Naming fs/2 as the passband edge admits m = 1 (a tone at fs/2), where the phases
+        //      have rolled off by design and a peak midway between samples is not seen at all -- a number in the
+        //      hundreds of dB, not a metering error; the constant describes the table, as (l) already asserts.
+        {
+            const TruePeakSineLowBound half = truePeakSineLowBoundOf(truePeakPolyphase(), 0.5);
+            check(std::fabs(half.frequency - 0.5) < 1e-12 && half.db > 10.0, "naming fs/2 as the edge admits m = 1 and reads a huge 'low side' (the roll-off), so the constant describes the table");
+        }
     }
 
     // ---- 4. K-weighting: ~flat at 1 kHz, attenuates lows, +6 dB doubling ----

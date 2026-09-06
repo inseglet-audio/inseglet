@@ -229,47 +229,92 @@ inline double kWeightedMeanSquare(const AudioBuffer& buf, int ch) {
 }
 
 // ------------------------------------------------------------------------------------------------
-// True peak (dBTP) — 4x oversampling per ITU-R BS.1770-4 Annex 2, using the Recommendation's own
-// tabulated 48-tap, 4-phase polyphase FIR (12 taps per phase), coefficient for coefficient.
+// True peak (dBTP) — 8x oversampling with a 24-tap-per-phase polyphase FIR OF OUR OWN DESIGN.
 // ------------------------------------------------------------------------------------------------
 //
-// The four phases are mirror pairs (0<->3, 1<->2), so none of them is the input sample: the filter
-// evaluates the waveform 1/8, 3/8, 5/8 and 7/8 of a sample interval away from each sample. Its
-// passband is not flat (about +0.22 dB at fs/4, -0.22 dB at fs/6), and like every 4x interpolator it
-// under-reads a peak that falls between its own points — by up to ~0.55 dB at 0.45 fs (Annex 2,
-// Appendix 1). Both are inside the +0.2/-0.4 dB tolerance EBU Tech 3341 sets on its true-peak test
-// signals (Table 1, 15-19), which tests/unit/test_meter.cpp measures on every build.
+// ⛔ THIS IS A CLAIM CHANGE (the release after 1.20.0).  Through 1.20.0 the interpolator was ITU-R BS.1770-4 Annex 2's
+//   own tabulated 48-tap, 4-phase filter, coefficient for coefficient, at the 4x the Recommendation
+//   sets as its minimum.  Measured in context against an exact (FFT-domain) reference on the EBU's
+//   published programme material, that estimator read up to 0.52 dB LOW (SQAM 27, castanets) and up
+//   to 0.22 dB HIGH (Euroradio 05), and the shape of the error was diagnosed: at 4x the evaluation
+//   GRID under-reads by up to 20*log10(cos(pi*f/4)) -- 0.44 dB at 0.40 fs -- and the 12-tap table's
+//   passband ripple (+0.22 dB at fs/4) happened to cancel some of it on some material while adding to
+//   it on other material.  A better filter at 4x reads WORSE (0.25 dB), because an accurate filter
+//   simply exposes the grid.  The design point is joint: grid AND filter.
 //
-// The previous interpolator was a 12-tap Hann-windowed sinc with the input sample as phase 0. It was
-// also inside that tolerance, but a 12-tap Hann window droops in the top octave (-0.9 dB at 0.40 fs
-// and -3.8 dB at 0.44 fs on its half-sample phase), so on dense, bright material it recovered less of
-// the inter-sample peak than this table does — about 0.15 dB less at 44.1 kHz on a nine-partial test
-// chord — and always in the direction that reads low.
+// WHAT SHIPS.  Eight phases at delays (2q+1)/16 of a sample (none of them the input sample, which is
+//   kept as a floor), each a 24-tap per-phase minimax design with a passband edge at 0.45 fs, every
+//   phase DC-normalised, mirror-symmetric (q <-> 7-q).  Computed passband complex error 0.00996
+//   (+0.086 / -0.087 dB), no gain above the edge.  ⛔ THE TABLE BELOW IS THE DESIGN, NOT A DERIVATION
+//   OF IT: it was designed once (Lawson IRLS, a fixed point rather than a proof of Chebyshev
+//   optimality), evaluated against the reference, and written down.  Change a coefficient and every
+//   disclosed bound in this header follows it, because they are computed from the table at first call.
+//
+// WHAT IT BUYS, MEASURED THE SAME WAY ON THE SAME MATERIAL (every window in its file context, against
+//   the exact reference): worst error 0.137 dB LOW (castanets) from 0.522, and up to 0.097 dB HIGH
+//   (SQAM 64) from 0.216; on the standard's own true-peak test signals the worst is 0.127 dB low at
+//   fs/4 (cases 16 and 19), every one inside the +0.2/-0.4 dB window EBU Tech 3341 sets.  The 0.137 is
+//   the 8x GRID's own bound at the passband edge -- 20*log10(cos(pi*0.45/8)) = 0.1363 -- which is
+//   what an accurate filter leaves.  16x buys 0.016 more; 32 taps buys 0.010; both at once, 0.03.
+//
+// WHAT IT COSTS, STRUCTURALLY: 8 phases x 24 taps = 192 multiply-adds per input sample, against the
+//   4x12 table's 48 -- four times the interpolation work (the meter runs ONE pass for both true-peak
+//   numbers, see truePeakLinearFused).  A timed multiplier is a separate measurement on a quiet
+//   machine and is not written here.
+//
+// The previous interpolator's own predecessor was a 12-tap Hann-windowed sinc with the input sample
+// as phase 0; it drooped -0.9 dB at 0.40 fs and always read low.  The Recommendation's table fixed the
+// droop and left the grid; this one addresses both.
 inline std::vector<std::vector<double>> truePeakPolyphase() {
-    // ITU-R BS.1770-4 Annex 2, Table: "one set of filter coefficients (for the order 48, 4-phase,
-    // FIR interpolating)". Phase p, tap t. Values are the Recommendation's (exact in Q15).
-    static const double k[4][12] = {
-        { 0.0017089843750,  0.0109863281250, -0.0196533203125,  0.0332031250000, -0.0594482421875,  0.1373291015625,
-          0.9721679687500, -0.1022949218750,  0.0476074218750, -0.0266113281250,  0.0148925781250, -0.0083007812500},
-        {-0.0291748046875,  0.0292968750000, -0.0517578125000,  0.0891113281250, -0.1665039062500,  0.4650878906250,
-          0.7797851562500, -0.2003173828125,  0.1015625000000, -0.0582275390625,  0.0330810546875, -0.0189208984375},
-        {-0.0189208984375,  0.0330810546875, -0.0582275390625,  0.1015625000000, -0.2003173828125,  0.7797851562500,
-          0.4650878906250, -0.1665039062500,  0.0891113281250, -0.0517578125000,  0.0292968750000, -0.0291748046875},
-        {-0.0083007812500,  0.0148925781250, -0.0266113281250,  0.0476074218750, -0.1022949218750,  0.9721679687500,
-          0.1373291015625, -0.0594482421875,  0.0332031250000, -0.0196533203125,  0.0109863281250,  0.0017089843750},
+    // Phase q (row), tap t (column).  Delay of phase q: (2q+1)/16 sample.  Output position i reads
+    // input samples i-11 .. i+12 (idx = i + t - 11).  17 significant digits: the design as computed.
+    static const double k[8][24] = {
+        { -0.0015819068091455616, 0.0016992223948436101, -0.0022698332128575564, 0.0034681277171338424, -0.0046147363786762105, 0.0065513254236299265,
+          -0.0087938067053162233, 0.012431580265103626, -0.017780833199325143, 0.028335208466205561, -0.057125652745007457, 0.99304860904026004,
+          0.066287321914134889, -0.031312985954301188, 0.019937746576560101, -0.013834385254721623, 0.010260497867554969, -0.0075066122118163919,
+          0.0057492786570788532, -0.0041146059894919323, 0.0031458400952364108, -0.0020770827820778661, 0.0015740624243883701, -0.001476379599393157},
+        { -0.0044556152824453688, 0.0047798126337519611, -0.0063728492023551646, 0.0097238136155321751, -0.012904111107786704, 0.018272642670042114,
+          -0.024418742621230376, 0.034326289399373336, -0.048603166511983931, 0.076027541552725675, -0.14539934304659619, 0.94187182780000578,
+          0.21755211480763717, -0.095231249991409819, 0.059223353953998165, -0.040645587927165223, 0.02993497246871249, -0.021811181910731066,
+          0.016646399820315565, -0.011889480391252658, 0.0090697099410550208, -0.0059815523338887658, 0.004525662481026883, -0.0042412608173309201},
+        { -0.006597880990558312, 0.007069299990151442, -0.009408058748187207, 0.014335860596895426, -0.018975306416193854, 0.026803908653684635,
+          -0.035667395728629765, 0.049872785831657551, -0.06995129585790455, 0.10759350555251421, -0.19673583632785116, 0.84534950759265071,
+          0.38445872906298562, -0.15298746070991828, 0.092665716525959257, -0.062847007216821113, 0.045944333860192026, -0.033332291356168255,
+          0.02534670533940651, -0.018065808004438119, 0.013749371751880662, -0.0090571518743041649, 0.0068413428586704926, -0.0064055743856740064},
+        { -0.0077034650970589733, 0.0082444427338694455, -0.010952339420182712, 0.016667461968259911, -0.022005967807104718, 0.031011907216851254,
+          -0.041098444859379371, 0.057178195535271023, -0.0794899199776056, 0.12040319906915967, -0.21180114503096248, 0.71214446215754545,
+          0.5539905068921992, -0.19484461178913512, 0.11456501131114004, -0.076704621017147825, 0.05563644700628171, -0.040181548539550672,
+          0.030439552403556714, -0.021648672995547576, 0.016437029148536373, -0.010814455775224021, 0.008154862278685426, -0.0076278854124571093},
+        { -0.0076278854124575447, 0.0081548622786858961, -0.010814455775224226, 0.016437029148536429, -0.021648672995547406, 0.030439552403558195,
+          -0.040181548539551068, 0.055636447006281446, -0.076704621017148686, 0.11456501131114001, -0.19484461178913648, 0.55399050689219986,
+          0.7121444621575449, -0.21180114503096273, 0.12040319906915865, -0.079489919977604157, 0.057178195535271065, -0.041098444859378157,
+          0.031011907216851813, -0.022005967807105144, 0.016667461968257927, -0.010952339420182462, 0.0082444427338701758, -0.0077034650970583029},
+        { -0.0064055743856729084, 0.006841342858668901, -0.0090571518743061373, 0.013749371751880249, -0.01806580800443645, 0.025346705339407964,
+          -0.033332291356167151, 0.04594433386019324, -0.062847007216820475, 0.092665716525958869, -0.1529874607099185, 0.3844587290629865,
+          0.84534950759264982, -0.19673583632785169, 0.10759350555251393, -0.069951295857903148, 0.049872785831659827, -0.035667395728627024,
+          0.026803908653683827, -0.018975306416195815, 0.014335860596892964, -0.0094080587481886902, 0.0070692999901493464, -0.0065978809905575366},
+        { -0.0042412608173295289, 0.0045256624810272924, -0.0059815523338883261, 0.0090697099410546409, -0.011889480391252732, 0.016646399820312859,
+          -0.021811181910732103, 0.029934972468712125, -0.040645587927163239, 0.059223353954001128, -0.095231249991408126, 0.21755211480763459,
+          0.94187182780000434, -0.14539934304659782, 0.076027541552724551, -0.048603166511985145, 0.034326289399373468, -0.024418742621230678,
+          0.018272642670041382, -0.012904111107788128, 0.0097238136155324804, -0.0063728492023527941, 0.0047798126337542275, -0.0044556152824443565},
+        { -0.0014763795993944962, 0.0015740624243900099, -0.0020770827820787057, 0.0031458400952376463, -0.0041146059894924944, 0.0057492786570828838,
+          -0.0075066122118171257, 0.010260497867558114, -0.01383438525472353, 0.019937746576564636, -0.031312985954300834, 0.066287321914137207,
+          0.99304860904025083, -0.057125652745011149, 0.028335208466201404, -0.017780833199321014, 0.012431580265103121, -0.0087938067053140133,
+          0.0065513254236261005, -0.0046147363786769148, 0.0034681277171312651, -0.0022698332128554977, 0.0016992223948448686, -0.0015819068091422366},
     };
-    std::vector<std::vector<double>> ph(4, std::vector<double>(12, 0.0));
-    for (int p = 0; p < 4; ++p)
-        for (int t = 0; t < 12; ++t) ph[p][t] = k[p][t];
+    std::vector<std::vector<double>> ph(8, std::vector<double>(24, 0.0));
+    for (int p = 0; p < 8; ++p)
+        for (int t = 0; t < 24; ++t) ph[p][t] = k[p][t];
     return ph;
 }
 
 // The edge guard, in SAMPLES, excluded at EACH end by truePeakDbInterior below.
 //
-// ⛔ SIX, AND IT IS DERIVED FROM THE FILTER RATHER THAN SWEPT.  An output at position i reads
-//    idx = i + (t - half + 1) for t in [0, taps), i.e. i-5 .. i+6.  Zero-padding therefore reaches
-//    positions 0..4 at the head and the last SIX positions at the tail, so 6 is the smallest guard
+// ⛔ TWELVE, AND IT IS DERIVED FROM THE FILTER RATHER THAN SWEPT.  An output at position i reads
+//    idx = i + (t - half + 1) for t in [0, taps), i.e. i-11 .. i+12.  Zero-padding therefore reaches
+//    positions 0..10 at the head and the last TWELVE positions at the tail, so 12 is the smallest guard
 //    that covers every position the padding can touch -- AT ANY BUFFER LENGTH, FOR ANY SIGNAL.
+//    (Through 1.20.0 the table had 12 taps and the guard was 6, derived the same way.)
 //    Change the table and this constant follows it: kTruePeakEdgeGuard IS kTruePeakTaps / 2, and
 //    truePeakLinearOver ASSERTS the table really has that many taps, so the two cannot drift.
 //
@@ -281,17 +326,17 @@ inline std::vector<std::vector<double>> truePeakPolyphase() {
 //        guard 5, 6, 7, 8 -> +0.000000
 //    ⇒ a guard of 2 SHIPS THE DEFECT IT WAS ADDED TO DISCLOSE, on ordinary material.  The earlier
 //    "generous 8" was closer to right than the beat that corrected it, and the derivation above
-//    is why 6 rather than 8: 8 is a round number, 6 is the tap geometry.
+//    is why the guard is the tap geometry and not a round number (6 for that table; 12 for this one).
 //
 // ⛔ IT IS A CONSTANT AND NOT A PARAMETER, on purpose: a flag that changes what "true peak" means
 //    is that same class of defect waiting to happen.
-inline constexpr int kTruePeakTaps      = 12;   // ITU-R BS.1770-4 Annex 2, per phase
+inline constexpr int kTruePeakTaps      = 24;   // per phase; the table above IS the design
 inline constexpr int kTruePeakEdgeGuard = kTruePeakTaps / 2;
 
 // The oversampling factor, and THE CEILING IT PUTS ON THIS METER'S HONESTY.
 //
-// WHY THIS EXISTS.  A 4x estimator evaluates the reconstructed waveform only on a grid of 1/4
-//   sample, so the nearest evaluation point to an actual inter-sample maximum is at most 1/8 of a
+// WHY THIS EXISTS.  An 8x estimator evaluates the reconstructed waveform only on a grid of 1/8
+//   sample, so the nearest evaluation point to an actual inter-sample maximum is at most 1/16 of a
 //   sample away.  For a sinusoid at frequency f the value there is cos(2*pi*f*dt) times the peak,
 //   with dt = 1/(2*OS) samples -- so the reading can fall BELOW the truth, and the shortfall grows
 //   with frequency.  At the band edge that is -20*log10(cos(pi/(2*OS))).
@@ -309,26 +354,27 @@ inline constexpr int kTruePeakEdgeGuard = kTruePeakTaps / 2;
 //     it assumes  -- a sinusoid.  A general band-limited signal is not one, and the extension is
 //                    standard textbook reasoning rather than something measured here.
 //
-// ⚠️ ONE MEASURED DATUM, AND IT IS n = 1.  An independent 64x sinc reference calibrated against
-//   closed-form sine peaks to 1.3e-5 dB read a Tech 3341 case-22-style construction 0.133863 dB
-//   ABOVE this meter.  That signal's content sits at fs/4, where this closed form gives
-//   0.168521213 dB -- so the measurement is INSIDE the bound.  Corroboration, not proof.
-// ⛔ SUPERSEDED FIGURE, KEPT FOR THE TRAIL: that 0.133863 was measured on a SYNTHESISED
-//   case 22 against a reference later shown NOT converged.  Measured since, against an exact
-//   reference, on the EBU's PUBLISHED files: case 22 reads 0.1252 dB low, case 17 reads 0.2953 dB
-//   low (the grid accounts for 0.1685 of it at fs/4; the rest is the filter's loss), and on
-//   programme material the meter reads up to 0.521751 dB LOW (SQAM 27, castanets) and up to
-//   +0.215802 dB HIGH (Euroradio 05).  The HIGH side is what truePeakFilterGainBoundDb, below the
-//   grid bound, now discloses; the LOW side beyond the grid bound is disclosed in words only.
+// ⚠️ THE MEASURED LOW SIDE, FOR THIS TABLE, in context against an exact reference on the EBU's
+//   published files: castanets (SQAM 27, the brightest file) reads 0.136516 dB LOW -- and the grid
+//   bound at the passband edge, 20*log10(cos(pi*0.45/8)) = 0.1363, IS that number: the grid is what
+//   an accurate filter leaves.  The standard's fs/4 tones (cases 16, 19) read 0.1266 dB low, which is
+//   the fs/4 grid figure (0.0419) plus the phase ripple (up to 0.087 dB).  The total LOW side is
+//   therefore bounded by this grid bound PLUS the filter's per-phase loss, and the loss is disclosed
+//   in words in the tool description; the HIGH side is truePeakFilterGainBoundDb, below.
+//   ⛔ SUPERSEDED IN PART: the loss is now ALSO a field, truePeakFilterLossBoundDb, computed
+//   from the table like this one -- the sentence above is kept for the trail.
+// ⛔ THE 4x TABLE'S FIGURES, KEPT FOR THE TRAIL: it read case 17 0.2953 dB low, castanets 0.521751 dB
+//   low and Euroradio 05 +0.215802 dB high; its band-edge grid bound was 0.6877 dB and its fs/4 grid
+//   figure 0.1685.  Those numbers describe an estimator that no longer ships.
 //
-// ⛔ RAISING OS IS A DIFFERENT CHANGE AND IS NOT THIS ONE.  It costs CPU on every meter call and
-//   on every export path that meters, whether or not the material has a transient.  Disclosing the
-//   ceiling is cheap and honest and LEAVES THE NUMBER WRONG; that trade was made deliberately.
-inline constexpr int kTruePeakOversampling = 4;   // BS.1770-4 Annex 2: 4x is the MINIMUM it allows
+// ⛔ THE FACTOR WAS RAISED TOGETHER WITH THE FILTER, NOT ALONE.  Raising it alone buys little (12 taps
+//   is the filter's limit) and a better filter alone reads worse (it exposes the 4x grid); the two
+//   move together, and the cost -- four times the interpolation work -- is stated above.
+inline constexpr int kTruePeakOversampling = 8;   // BS.1770-4 Annex 2 sets 4x as the MINIMUM; this is 8x
 
 inline double truePeakGridBoundDb() {
     // ⛔ COMPUTED, NEVER A LITERAL.  Change kTruePeakOversampling and this follows it; a hardcoded
-    //   0.6877 would quietly describe a meter that no longer exists.
+    //   0.1685 would quietly describe a meter that no longer exists (0.6877 already did, at 4x).
     return -20.0 * std::log10(std::cos(M_PI / (2.0 * (double)kTruePeakOversampling)));
 }
 
@@ -341,20 +387,25 @@ inline double truePeakGridBoundDb() {
 //   An over-read has exactly one source in this estimator: a phase whose gain exceeds 1 at the
 //   signal's frequency.  So the over-read bound for a sine is the largest |H_p(f)| over the four
 //   phases and all frequencies -- a number that follows from the twelve tabulated coefficients and
-//   nothing else.  For the shipped table it is attained near fs/4 (phase 1), where the table's
-//   best-phase gain is +0.22 dB.  A reading can therefore sit ABOVE the truth by up to this much:
+//   nothing else.  For the table that ships it is +0.086 dB, attained low in the band (near 0.037 fs)
+//   where the minimax ripple peaks; for the 4x table it was +0.22 dB near fs/4.  A reading can
+//   therefore sit ABOVE the truth by up to this much:
 //       truth - (grid bound + filter loss)  <=  truePeakDb  <=  truth + truePeakFilterGainBoundDb.
 //
 // ⛔ WHAT IT COVERS AND WHAT IT DOES NOT:
 //     it covers  -- the FILTER's gain above unity at the phases the estimator evaluates, for a sine.
 //                   It is an OVER-read bound; a reading above it is a defect in this code.
 //     it EXCLUDES -- the filter's LOSS (gain below unity), which adds to the LOW side beyond the
-//                    grid bound and is NOT bounded by any field: on the standard's own case 17 the
-//                    meter reads 0.2953 dB low where the grid alone accounts for 0.1685, and on
-//                    castanets (EBU SQAM 27, 44.1 kHz) 0.521751 dB low against an exact reference.
+//                    grid bound and is NOT bounded by any field: this table's per-phase ripple is
+//                    up to 0.087 dB, so the standard's fs/4 tones read 0.1266 dB low where the grid
+//                    alone accounts for 0.0419, and castanets reads 0.1365 dB low at the passband
+//                    edge where the grid alone accounts for 0.1363.
+//                    ⛔ "NOT bounded by any field" IS SUPERSEDED: it is now bounded by
+//                    truePeakFilterLossBoundDb, below; the exclusion from THIS field stands.
 //     it assumes  -- a sinusoid, like its sibling; on a broadband transient the phases' phase error
-//                    can align components better than the input had them, and a measurement showed a
-//                    24-tap design over-reading a real window by 0.011 dB MORE than its sine bound.
+//                    can align components better than the input had them, and THIS table was measured
+//                    over-reading a real window (SQAM 64) by +0.0968 dB, 0.011 dB MORE than its sine
+//                    bound.  The unit test asserts that excess exists and that it is small.
 //     it applies to -- the INTERIOR reading (truePeakDbInterior).  truePeakDb is the whole-buffer
 //                    maximum and its taps are fed zeros beyond the buffer; at a raw edge the step
 //                    they ring at can exceed the filter's gain on the signal (measured at
@@ -363,7 +414,8 @@ inline double truePeakGridBoundDb() {
 //                    through truePeakDb() and FAILED -- correctly.
 //
 // ⛔ COMPUTED FROM THE TABLE AT FIRST CALL, NEVER A LITERAL.  Change one coefficient and this follows
-//   it; a hardcoded 0.222 would describe a table that no longer exists (the same argument as above,
+//   it; a hardcoded 0.086 would describe a table that no longer exists (0.222 already does, the 4x
+//   table's, and it was never a literal either -- the same argument as above,
 //   and the unit test asserts the bound is TIGHT against the meter itself, which a stale literal
 //   would fail).  The scan is 8193 points on [0, fs/2] plus a golden-section refinement; the cost
 //   is paid once per process.
@@ -392,7 +444,204 @@ inline double truePeakFilterGainBoundDb() {
     return bound;
 }
 
-// The maximum of |x| AND of all four interpolated phases, taken over OUTPUT POSITIONS [lo, hi).
+// THE THIRD NUMBER: the interpolation filter's own LOSS below unity, within its passband.
+//
+// WHY THIS EXISTS.  The two bounds above leave one side half-stated: truePeakGridBoundDb says how far
+//   the GRID can read a sine low and EXCLUDES the filter's loss; truePeakFilterGainBoundDb says how
+//   far the FILTER can read high.  How far the filter can read LOW was a sentence in the description
+//   ("up to 0.09 dB per phase").  A sentence goes stale the day the table changes; a number computed
+//   from the table does not.  The loss bound is the largest attenuation of any phase at any frequency
+//   inside the passband -- max over q and f in [0, kTruePeakPassbandEdge] of -20 log10 |H_q(f)| --
+//   so that for a sine inside the passband:
+//       truth - (truePeakGridBoundDb + truePeakFilterLossBoundDb)  <=  truePeakDbInterior  <=  truth + truePeakFilterGainBoundDb.
+//   For the table that ships it is about 0.088 dB, attained AT the passband edge (phases 3 and 4, the
+//   two farthest from an input sample); the same phases lose 0.084 dB at fs/4, which with the fs/4
+//   grid figure (0.042) is within 0.001 dB of the 0.1266 the standard's fs/4 tones measure low.  The
+//   unit test drives a sine at fs/4 through the meter and asserts the reading is within 0.002 dB of
+//   grid + loss at that frequency (a long tone at fs/4 samples the same four positions for ever, so no
+//   later cycle rescues it).  ⛔ WITHIN, NOT "NEVER BELOW": the meter reads 0.0008 dB LOWER than grid +
+//   loss there, because grid + loss is an ideal-delay model and the filter's PHASE error moves each
+//   phase's effective sampling instant -- a THIRD low-side contribution, not disclosed as a field (it is
+//   0.0008 dB at fs/4 for this table).  The sum of the two fields still covers the true single-peak
+//   worst case for a sine anywhere in the passband (0.127 dB, at fs/4, for this table), because the grid
+//   bound is taken at fs/2 and the loss bound at the passband edge, where no single peak meets both.
+//   ⛔ SUPERSEDED IN PART: that worst case is now ALSO a field, truePeakSineLowBoundDb, computed
+//   from the table like this one, with the phase error in -- the figure above is kept for the trail.
+//
+// ⛔ WHAT IT COVERS AND WHAT IT DOES NOT:
+//     it covers   -- the FILTER's attenuation at the phases the estimator evaluates, for a sine INSIDE
+//                    the passband.  It is a LOW-side quantity like the grid bound and ADDS to it; the
+//                    sum is the low-side bound -- per frequency in the inequality above and, as the two
+//                    fields, a frequency-independent worst case.
+//     it EXCLUDES -- content ABOVE the passband edge (kTruePeakPassbandEdge, 0.45 fs: 21.6 kHz at
+//                    48 kHz, 19.8 kHz at 44.1 kHz), where the filter rolls off by design (about 14 dB
+//                    at fs/2).  On band-limited programme material there is no peak to miss there; on
+//                    a synthetic tone in the transition band the interpolated phases read low and the
+//                    sample-peak floor is what remains.  That is why the field carries a scope and not
+//                    just a number.
+//     it assumes  -- a sinusoid, like its siblings; on a broadband transient the phases can add error
+//                    of either sign (the gain bound's SQAM 64 datum is the measured case).
+//     it applies to -- the INTERIOR reading, for the same reason as the gain bound.
+//
+// ⛔ THE PASSBAND EDGE IS A CONSTANT BESIDE THE TABLE AND DESCRIBES IT.  The table was designed with a
+//   passband edge at 0.45 fs; the constant is not derived from the coefficients and the two could
+//   drift.  The unit test guards that: the loss just inside the edge is small and the loss at fs/2 is
+//   large, so a constant that named a different edge would fail.
+inline constexpr double kTruePeakPassbandEdge = 0.45;   // of fs; the design's passband edge
+
+// ⛔ COMPUTED FROM THE TABLE AT FIRST CALL, NEVER A LITERAL -- and the computation is a function of
+//   (table, edge) so that the unit test can PLANT a table and assert the number MOVES.  A stale literal
+//   fails that test; a function that ignored its table would too.  The scan is 8193 points on [0, edge]
+//   plus a golden-section refinement; the cost is paid once per process.
+inline double truePeakFilterLossBoundDbOf(const std::vector<std::vector<double>>& ph, double passbandEdge) {
+    const int taps = (int)ph[0].size(), half = taps / 2;
+    auto lossAt = [&](double f) {          // the WORST phase's attenuation at f, in dB (positive = loss)
+        const double w = 2.0 * M_PI * f; double gmin = 1e300;
+        for (const auto& hp : ph) {
+            double re = 0.0, im = 0.0;
+            for (int t = 0; t < taps; ++t) { const double m = (double)(t - half + 1); re += hp[t] * std::cos(w * m); im += hp[t] * std::sin(w * m); }
+            const double a = std::sqrt(re * re + im * im); if (a < gmin) gmin = a;
+        }
+        return -20.0 * std::log10(gmin);
+    };
+    const int N = 8192; double best = -1e300, fb = 0.0;
+    for (int k = 0; k <= N; ++k) { const double f = passbandEdge * (double)k / N; const double l = lossAt(f); if (l > best) { best = l; fb = f; } }
+    double lo = fb - passbandEdge / N, hi = fb + passbandEdge / N; if (lo < 0.0) lo = 0.0; if (hi > passbandEdge) hi = passbandEdge;
+    for (int it = 0; it < 80; ++it) {
+        const double a = hi - 0.618033988749895 * (hi - lo), b = lo + 0.618033988749895 * (hi - lo);
+        if (lossAt(a) < lossAt(b)) lo = a; else hi = b;
+    }
+    const double refined = lossAt(0.5 * (lo + hi));
+    return refined > best ? refined : best;   // the refinement can only tighten; never report less than the scan saw
+}
+inline double truePeakFilterLossBoundDb() {
+    static const double bound = truePeakFilterLossBoundDbOf(truePeakPolyphase(), kTruePeakPassbandEdge);
+    return bound;
+}
+
+// THE FOURTH NUMBER: the estimator's worst under-read of a STEADY sine, the grid, the filter's magnitude
+//   AND its phase error all in -- the tight low side.
+//
+// WHY THIS EXISTS.  The three numbers above are honest and LOOSE together: truePeakGridBoundDb is the
+//   grid's worst case at fs/2, truePeakFilterLossBoundDb the filter's worst attenuation at the passband
+//   edge, and their sum (0.256 dB for this table) is roughly twice what this estimator can actually do
+//   to a sine (0.127 dB, at fs/4) -- because no one peak meets the two worst cases at once, and because
+//   neither field carries the filter's PHASE error, which moves each phase's effective sampling
+//   instant (measured: 0.0008 dB at fs/4 for this table).  A professional bracketing a reading deserves
+//   the tight number, and a tight number that is a literal goes stale the day the table changes.
+//
+// WHAT IT IS.  A steady sine at f = a fs / b (lowest terms) has |x| repeating every b/(2a) samples, so its
+//   extrema visit a fixed set of grid offsets -- ONE when b is even and a = 1 (fs/4, fs/6, ...: the tone never
+//   gets a second look), otherwise a (b even) or 2a (b odd) offsets equally spaced -- and the tone reads the
+//   BEST of them.  One extremum at position p is read by every instant as |H_g(f)| * |cos(2 pi f (t_g - p))|,
+//   over the raw sample (H = 1 at t = 0) and every phase at its EFFECTIVE instant t_q = arg H_q(f) / (2 pi f)
+//   (the design intends (2q+1)/16; the filter's phase error is the difference); the tone's reading is the
+//   largest over its offsets, and W(a, b) is -20 log10 of the smallest that reading can be over the alignment.
+//   The field is the maximum of W over every a/b with b <= 32 inside the passband (exhaustive), plus the
+//   fs/(2m) tail.  For the table that ships: 0.126620 dB at fs/4 (one offset; the peak midway between phases
+//   3 and 4, effective instants 0.436884 and 0.563116 of a sample), which is, to six places, what the
+//   standard's own fs/4 tones (Tech 3341 cases 16 and 19) were measured low against an exact reference (doc
+//   278) and what the meter reads on them.  ⛔ THE RUNNERS-UP ARE NOT IN THE fs/(2m) FAMILY: fs/3 (two
+//   offsets) reads 0.1169 and 2fs/5 (four) 0.1133 -- their offsets are spaced at multiples of the grid's own
+//   midpoint spacing, so every one of them can sit in a gap at once; a first draft of this field ran the
+//   family alone and would have been 0.01 dB from being wrong.  THE MODEL IS THE METER: the test drives long
+//   tones at those four frequencies and the meter reproduces W to better than 1e-6 dB at each.
+//
+// ⛔ WHAT IT COVERS AND WHAT IT DOES NOT:
+//     it covers   -- a STEADY sine at any frequency inside the passband, any alignment, through the
+//                    INTERIOR reading: the reading is never lower than the truth minus this number.  It
+//                    is a LOW-side quantity, positive, and it is at most the sum of the two fields above
+//                    (asserted) -- it does not replace them, each of which names a mechanism.
+//     it EXCLUDES -- a LONE extremum with no neighbour of its own height (a transient), which the grid
+//                    can miss at the EDGE frequency with no later extremum to rescue it: that worst case
+//                    is larger (about 0.23 dB for this table, the single-extremum worst at the edge) and
+//                    is bounded by the two fields' SUM, not by this one -- stated here so the tight number
+//                    is not read as the transient number.  It excludes content above the passband edge,
+//                    like its siblings.
+//     it assumes  -- a sinusoid; the effective-instant model of each phase is exact for one, and was
+//                    measured against the meter to six places.
+//     it applies to -- the INTERIOR reading, for the same reason as its siblings.
+//
+// ⛔ COMPUTED FROM THE TABLE AT FIRST CALL, NEVER A LITERAL -- as a function of (table, edge) so the unit
+//   test can PLANT a table (x0.99 moves it by exactly 20 log10(1/0.99)), plant an INSTANT error (phase 3 a
+//   copy of phase 2 doubles a gap and the number rises), and name fs/2 as the edge (which admits m = 1 and
+//   reads hundreds of dB: the edge is real).  The position scan is EVEN (128 points per offset spacing) so
+//   the midpoint between two phases is ON the grid (a lesson learned), refined by golden section; b runs to 32
+//   and the tail to fs/256, below which the grid term is under 0.0002 dB.  The cost is paid once per process.
+inline double truePeakSineWorstDbOf(const std::vector<std::vector<double>>& ph, int a, int b) {
+    // the worst under-read of a STEADY sine at f = a fs / b (a/b in lowest terms), in dB (positive = reads low).
+    // |x| has period b/(2a) samples, so the tone's extrema visit  a  distinct grid offsets when b is even and  2a
+    // when b is odd, equally spaced; the tone reads the BEST of them, and the worst tone is the alignment p0 at
+    // which that best is smallest.  With a = 1 and b even (the fs/(2m) family) there is one offset: no second look.
+    const int taps = (int)ph[0].size(), half = taps / 2, P = (int)ph.size();
+    const double f = (double)a / (double)b, w = 2.0 * M_PI * f;
+    std::vector<double> mag(P + 1, 1.0), tau(P + 1, 0.0);          // [0] is the raw sample: H = 1, instant 0
+    for (int q = 0; q < P; ++q) {
+        double re = 0.0, im = 0.0;
+        for (int t = 0; t < taps; ++t) { const double mm = (double)(t - half + 1); re += ph[q][t] * std::cos(w * mm); im += ph[q][t] * std::sin(w * mm); }
+        mag[q + 1] = std::sqrt(re * re + im * im); tau[q + 1] = std::atan2(im, re) / w;   // the EFFECTIVE instant
+    }
+    const double quarter = 0.25 / f; const int nmax = (int)std::ceil(quarter) + 1;
+    auto reading = [&](double p) {                                 // the largest |value| any instant within a quarter period sees of ONE extremum at p
+        double best = 0.0;                                         // (the tone's OTHER extrema are the offsets below; an instant a quarter period away reads 0)
+        for (int n = -nmax; n <= nmax; ++n) for (int g = 0; g <= P; ++g) {
+            const double d = (double)n + tau[g] - p; if (d > quarter || d < -quarter) continue;
+            const double v = mag[g] * std::fabs(std::cos(w * d)); if (v > best) best = v;
+        }
+        return best;
+    };
+    const int nOff = (b % 2 == 0) ? a : 2 * a;                     // the offsets a steady tone visits, spaced 1/nOff
+    const int N = 128 * nOff;                                      // EVEN, 128 points per offset spacing: the midpoint between two phases is on the grid
+    std::vector<double> R((size_t)N);                              // one extremum's reading on the grid, computed ONCE per frequency
+    for (int k = 0; k < N; ++k) R[(size_t)k] = reading((double)k / N);
+    double worst = 1e300, pw = 0.0;
+    for (int i = 0; i < N; ++i) {                                  // the tone reads the BEST of its offsets, 128 grid points apart
+        double best = 0.0;
+        for (int k = 0; k < nOff; ++k) { const double v = R[(size_t)((i + 128 * k) % N)]; if (v > best) best = v; }
+        if (best < worst) { worst = best; pw = (double)i / N; }
+    }
+    auto toneReading = [&](double p0) {                            // the same, off the grid, for the refinement
+        double best = 0.0;
+        for (int k = 0; k < nOff; ++k) { const double v = reading(p0 + (double)k / nOff); if (v > best) best = v; }
+        return best;
+    };
+    double lo = pw - 1.0 / N, hi = pw + 1.0 / N;
+    for (int it = 0; it < 60; ++it) {
+        const double x = hi - 0.618033988749895 * (hi - lo), y = lo + 0.618033988749895 * (hi - lo);
+        if (toneReading(x) > toneReading(y)) lo = x; else hi = y;   // minimising the reading
+    }
+    const double refined = toneReading(0.5 * (lo + hi));
+    const double r = refined < worst ? refined : worst;            // the refinement can only lower it; never report more than the scan saw
+    return -20.0 * std::log10(r > 1e-300 ? r : 1e-300);
+}
+struct TruePeakSineLowBound { double db; double frequency; };    // frequency in units of fs
+inline TruePeakSineLowBound truePeakSineLowBoundOf(const std::vector<std::vector<double>>& ph, double passbandEdge) {
+    // EXHAUSTIVE over every frequency a fs / b in lowest terms with b <= 32 inside the passband (every tone whose
+    // extrema visit few grid offsets lives there), plus the fs/(2m) tail to m = 128 for the low end, where the grid
+    // term is under 0.0002 dB.  Larger denominators mean more offsets and a better-rescued tone; the reference
+    // model (d284-sinelow.py) enumerates b <= 64 and finds nothing above the b <= 32 maximum for this table.
+    TruePeakSineLowBound out{ -1e300, 0.0 };
+    auto consider = [&](int a, int b) {
+        const double f = (double)a / (double)b; if (f > passbandEdge) return;
+        const double d = truePeakSineWorstDbOf(ph, a, b); if (d > out.db) { out.db = d; out.frequency = f; }
+    };
+    for (int b = 2; b <= 32; ++b) for (int a = 1; a < b; ++a) {
+        int x = a, y = b; while (y) { const int t = x % y; x = y; y = t; }   // gcd
+        if (x == 1) consider(a, b);
+    }
+    for (int m : { 48, 64, 96, 128 }) consider(1, 2 * m);
+    return out;
+}
+inline double truePeakSineLowBoundDb() {
+    static const TruePeakSineLowBound b = truePeakSineLowBoundOf(truePeakPolyphase(), kTruePeakPassbandEdge);
+    return b.db;
+}
+inline double truePeakSineLowBoundFrequency() {                    // where the bound is attained, in units of fs (fs/4 for this table)
+    static const TruePeakSineLowBound b = truePeakSineLowBoundOf(truePeakPolyphase(), kTruePeakPassbandEdge);
+    return b.frequency;
+}
+
+// The maximum of |x| AND of all OS interpolated phases, taken over OUTPUT POSITIONS [lo, hi).
 // ⛔ THE TAPS STILL REACH OUTSIDE [lo, hi) AND OUTSIDE THE BUFFER.  Restricting the range does not
 //    change the filter; it declines to REPORT the filter's output where the filter was fed zeros
 //    that are not in the signal.  That is the whole content of an "edge guard".
@@ -426,10 +675,10 @@ inline double truePeakLinearOver(const AudioBuffer& buf, int ch, size_t lo, size
     return peak;
 }
 
-// The maximum of |x| over the input samples AND over all four interpolated phases. The input sample
-// is kept as a floor on purpose: the table alone reads a sample-aligned peak up to ~0.22 dB BELOW the
-// sample (its nearest evaluation point is 1/8 sample away, and its outer phases sit at -0.02 dB at
-// fs/4), and a true peak reported below the sample peak is not a reading anyone should act on.
+// The maximum of |x| over the input samples AND over all OS interpolated phases. The input sample
+// is kept as a floor on purpose: the table alone can read a sample-aligned peak BELOW the sample (its
+// nearest evaluation point is 1/16 sample away and a phase can sit at -0.09 dB), and a true peak
+// reported below the sample peak is not a reading anyone should act on.
 // ⛔ UNCHANGED.  It is the whole-buffer maximum, it stays the whole-buffer maximum, and
 //    the number published in 1.17.0 does not move.  That is exactly what is forbidden here.
 inline double truePeakDb(const AudioBuffer& buf, int ch) {
@@ -438,7 +687,7 @@ inline double truePeakDb(const AudioBuffer& buf, int ch) {
 
 // THE SAME MAXIMUM WITH kTruePeakEdgeGuard SAMPLES EXCLUDED AT BOTH ENDS.
 //
-// WHY IT EXISTS.  The 12-tap polyphase interpolator is fed ZEROS outside the buffer, and a buffer
+// WHY IT EXISTS.  The polyphase interpolator is fed ZEROS outside the buffer, and a buffer
 //   whose first or last sample is non-zero therefore presents the filter with a step it must ring
 //   at.  That ring is REAL for a rendered file -- silence genuinely precedes its first sample at
 //   every listener's DAC -- so truePeakDb must keep reporting it.  But `analysis.meter` renders
@@ -464,6 +713,46 @@ inline bool truePeakDbInterior(const AudioBuffer& buf, int ch, double& outDb,
     if (buf.frames <= 2 * g) return false;
     outDb = linToDb(truePeakLinearOver(buf, ch, g, buf.frames - g));
     return true;
+}
+
+// ONE PASS, TWO MAXIMA.  analyzeChannel() needs both the whole-buffer maximum (truePeakDb) and the
+// edge-guarded one (truePeakDbInterior), and until 1.20.0 it computed them with two full passes of
+// the interpolator over the same samples.  This folds every output position's value -- the raw sample
+// and all OS interpolated phases -- into the whole-buffer maximum always, and into the interior maximum
+// when the position lies inside [guard, frames - guard).  The per-position values are the SAME doubles
+// truePeakLinearOver computes, and a maximum is order-independent, so both results are bit-identical
+// to the two-pass ones; the unit suite asserts that over the same fixtures the two-pass functions are
+// measured on.  truePeakDb() and truePeakDbInterior() are unchanged for their other callers.
+// ⛔ THE INTERIOR HALF KEEPS truePeakDbInterior's CONTRACT: no interior when frames <= 2*guard, and a
+//    guarded position is skipped ENTIRELY for the interior maximum, sample and phases alike.
+inline void truePeakLinearFused(const AudioBuffer& buf, int ch, int guard,
+                                double& outFull, double& outInterior, bool& interiorValid) {
+    static const std::vector<std::vector<double>> ph = truePeakPolyphase();
+    const int OS = kTruePeakOversampling, taps = (int)ph[0].size(), half = taps / 2;
+    static_assert(kTruePeakEdgeGuard == kTruePeakTaps / 2, "guard must stay taps/2");
+    assert(taps == kTruePeakTaps);
+    assert((int)ph.size() == kTruePeakOversampling);
+    const size_t g = guard < 0 ? (size_t)0 : (size_t)guard;
+    interiorValid = (guard >= 0) && (buf.frames > 2 * g);
+    const size_t ilo = interiorValid ? g : 0, ihi = interiorValid ? buf.frames - g : 0;
+    double full = 0.0, interior = 0.0;
+    for (size_t i = 0; i < buf.frames; ++i) {
+        double v = std::fabs((double)buf.at(i, ch));
+        for (int p = 0; p < OS; ++p) {
+            double acc = 0.0;
+            for (int t = 0; t < taps; ++t) {
+                long idx = (long)i + (t - half + 1);
+                if (idx < 0 || idx >= (long)buf.frames) continue;
+                acc += ph[p][t] * (double)buf.at((size_t)idx, ch);
+            }
+            double a = std::fabs(acc);
+            if (a > v) v = a;
+        }
+        if (v > full) full = v;
+        if (interiorValid && i >= ilo && i < ihi && v > interior) interior = v;
+    }
+    outFull = full;
+    outInterior = interior;
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -502,10 +791,14 @@ inline ChannelMetrics analyzeChannel(const AudioBuffer& buf, int ch) {
     double ms = sum / (double)buf.frames;
     m.rmsDb = powToDb(ms);
     m.peakDb = linToDb(peak);
-    m.truePeakDb = truePeakDb(buf, ch);
-    double interior = kMinDb();
-    m.truePeakInteriorValid = truePeakDbInterior(buf, ch, interior);
+    // One pass of the interpolator for both true-peak numbers (truePeakLinearFused, above); the
+    // two-pass form -- truePeakDb() then truePeakDbInterior() -- is what this is bit-identical to.
+    double fullLin = 0.0, interiorLin = 0.0; bool interiorValid = false;
+    truePeakLinearFused(buf, ch, kTruePeakEdgeGuard, fullLin, interiorLin, interiorValid);
+    m.truePeakDb = linToDb(fullLin);
+    m.truePeakInteriorValid = interiorValid;
     if (m.truePeakInteriorValid) {
+        const double interior = linToDb(interiorLin);
         m.truePeakDbInterior = interior;
         m.truePeakEdgeDominated = (m.truePeakDb > interior);
     }

@@ -6,6 +6,30 @@ All notable changes to Inseglet are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.22.0] — the bounds say what they do not cover on the low side, and the grid half is a theorem (2026-09-06)
+
+### Changed
+- **The true-peak bounds now say what they do NOT cover on the low side.** All four disclosed numbers
+  (`truePeakGridBoundDb`, `truePeakFilterLossBoundDb`, `truePeakSineLowBoundDb`, `truePeakFilterGainBoundDb`)
+  are derived for a sine. The description said so, and said that a broadband transient can exceed the GAIN
+  bound slightly; it did not say what can happen on the LOW side, where a reader at the ceiling would
+  reasonably infer that the 0.14 dB measured on programme material is close to the worst. It is not. The
+  interpolation error changes sign across the band, so a signal band-limited to the passband can carry energy
+  in phase where the filter loses and out of phase where it gains; the ripple then adds coherently. Such a
+  signal was constructed and driven through this meter and it reads about **0.40 dB low** — past the tight
+  sine number, past the single-extremum worst, and past the two fields' sum. The tool description and the
+  header's scope comments now say so, naming it as **found by search rather than computed from the table**,
+  and stating that the worst over all such signals is not known to be smaller. Programme material measured so
+  far still reads within 0.14 dB. **No number moved**: the twelve-fixture invariant probe reads
+  `truePeakDb` identical before and after, and all four bounds are unchanged.
+- **The GRID half of the guarantee is now stated as a theorem rather than an extrapolation.** A classical
+  inequality for band-limited functions (Duffin and Schaeffer's, through its cosine corollary) gives
+  `f(t0 + d) >= M cos(2 pi W d)` for every real signal band-limited to `W`, so the exact value at the nearest
+  evaluation instant is within `truePeakGridBoundDb` of the peak for **any** such signal, with the band-edge
+  sine as the extremal case. The header's scope comment said this extension was "standard textbook reasoning
+  rather than something measured here"; it is a theorem, and the same is emphatically NOT true of the filter
+  half, which is where the 0.40 dB lives.
+
 ## [1.21.0] — the true-peak interpolator is ours, the number moves, and the disclosure is complete in numbers (2026-09-06)
 
 ### Added

@@ -351,8 +351,14 @@ inline constexpr int kTruePeakEdgeGuard = kTruePeakTaps / 2;
 //                    which is a separate quantity of a different sign convention and is not
 //                    modelled here.  ⇒ THE TOTAL SHORTFALL CAN EXCEED THIS NUMBER.  The field is
 //                    named "grid" for that reason and the tool description says it in words.
-//     it assumes  -- a sinusoid.  A general band-limited signal is not one, and the extension is
-//                    standard textbook reasoning rather than something measured here.
+//     it assumes  -- a sinusoid FOR ITS WORST CASE, and for THIS field the assumption turns out to be
+//                    unnecessary: a classical inequality for band-limited functions (Duffin and
+//                    Schaeffer's, through its cosine corollary) gives f(t0 + d) >= M cos(2 pi W d) for
+//                    EVERY real signal band-limited to W, so the EXACT value at the nearest lattice
+//                    instant is within this bound of the peak for any such signal, with the edge sine
+//                    as the extremal case.  The grid half of the guarantee is therefore a theorem and
+//                    not an extrapolation from sines.
+//                    THE SAME IS NOT TRUE OF THE FILTER -- see truePeakSineLowBoundDb's scope below.
 //
 // ⚠️ THE MEASURED LOW SIDE, FOR THIS TABLE, in context against an exact reference on the EBU's
 //   published files: castanets (SQAM 27, the brightest file) reads 0.136516 dB LOW -- and the grid
@@ -558,8 +564,19 @@ inline double truePeakFilterLossBoundDb() {
 //                    is bounded by the two fields' SUM, not by this one -- stated here so the tight number
 //                    is not read as the transient number.  It excludes content above the passband edge,
 //                    like its siblings.
-//     it assumes  -- a sinusoid; the effective-instant model of each phase is exact for one, and was
-//                    measured against the meter to six places.
+//     it assumes  -- a sinusoid, AND HERE THE ASSUMPTION IS LOAD-BEARING.  The effective-instant model
+//                    of each phase is exact for one and was measured against the meter to six places,
+//                    but a bound derived from sines is a bound for sines.  The interpolation error's
+//                    SIGN CHANGES across the band, so a signal band-limited to the passband can carry
+//                    energy in phase where the filter loses and out of phase where it gains, and the
+//                    ripple then adds coherently instead of cancelling.  Such a signal has been
+//                    constructed and driven through this meter: it reads about 0.40 dB LOW -- past this
+//                    number, past the single-extremum worst above, and past the two fields' sum.  It was
+//                    found by SEARCH, not computed from the table, and the worst over all band-limited
+//                    signals is not known to be smaller; programme material measured so far stays within
+//                    0.14 dB.  The GRID half of the guarantee does extend to every band-limited signal
+//                    (see truePeakGridBoundDb); the FILTER half does not, and no sine-derived number
+//                    can make it.
 //     it applies to -- the INTERIOR reading, for the same reason as its siblings.
 //
 // ⛔ COMPUTED FROM THE TABLE AT FIRST CALL, NEVER A LITERAL -- as a function of (table, edge) so the unit

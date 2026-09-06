@@ -19,6 +19,36 @@
 <index version="1" name="reaper_mcp">
   <category name="Extensions">
     <reapack name="REAPER MCP" type="extension" desc="REAPER MCP — Model Context Protocol interface (immersive/spatial audio)">
+      <version name="1.22.0" author="James Livingston" time="2026-09-06T07:02:05Z">
+        <changelog><![CDATA[The true-peak bounds now say what they do NOT cover on the low side, and the grid half of the guarantee is a theorem.
+
+WHAT CHANGES. Nothing you measure. This release moves no number: the twelve-fixture invariant probe reads
+`truePeakDb` and all four disclosed bounds identical before and after. What changes is what the estimator
+tells you about the scope of those bounds.
+
+THE LOW SIDE HAS A WORST CASE THE SINE NUMBERS CANNOT SEE. All four bounds are derived for a sine. The
+description already said a broadband transient can exceed the GAIN bound slightly. It said nothing about the
+low side, where a reader at the ceiling would reasonably infer that the 0.14 dB measured on programme
+material is close to the worst. It is not. The interpolation error changes sign across the band, so a signal
+band-limited to the passband can carry energy in phase where the filter loses and out of phase where it gains,
+and the ripple then adds coherently instead of cancelling. Such a signal was constructed and driven through
+this meter: it reads about 0.40 dB low -- past `truePeakSineLowBoundDb`, past the single-extremum worst, and
+past the sum of the grid and loss bounds. The description now says so, names it as FOUND BY SEARCH rather than
+computed from the table, and states that the worst over all such signals is not known to be smaller.
+Programme material measured so far still reads within 0.14 dB.
+
+THE GRID HALF IS NOW A THEOREM. A classical inequality for band-limited functions (Duffin and Schaeffer's,
+through its cosine corollary) gives f(t0 + d) >= M cos(2 pi W d) for every real signal band-limited to W, so
+the exact value at the nearest evaluation instant is within `truePeakGridBoundDb` of the peak for ANY such
+signal, with the band-edge sine as the extremal case. The header no longer calls that extension "standard
+textbook reasoning"; it is a theorem. The same is emphatically not true of the filter half, which is where
+the 0.40 dB lives.
+
+WHY DISCLOSE IT. A measurement you rely on at the ceiling should tell you where it stops being trustworthy,
+so you can judge for yourself whether its tolerances meet your standards.
+]]></changelog>
+        <source main="main" file="reaper_mcp.dylib" platform="darwin">https://github.com/inseglet-audio/inseglet/releases/download/v1.22.0/reaper_mcp.dylib</source>
+      </version>
       <version name="1.21.0" author="James Livingston" time="2026-09-06T05:08:06Z">
         <changelog><![CDATA[The true-peak interpolator is now our own design, and the estimator says all four of its bounds as numbers.
 
